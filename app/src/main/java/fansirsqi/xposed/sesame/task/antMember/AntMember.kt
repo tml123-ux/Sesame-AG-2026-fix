@@ -1356,7 +1356,7 @@ class AntMember : ModelTask() {
         val bizType = targetBusinessArray[0]
         val bizSubType = targetBusinessArray[1]
         val bizParam = targetBusinessArray[2]
-        delay(Random.nextLong(2000, 15001))
+        delay(Random.nextLong(2000, 5001))
         val str = AntMemberRpcCall.executeTask(bizParam, bizSubType, bizType, id)
         val jo = JSONObject(str)
         if (!ResChecker.checkRes(TAG + "执行会员任务失败:", jo)) {
@@ -2115,11 +2115,8 @@ class AntMember : ModelTask() {
 
                 record(TAG, "芝麻炼金广告任务: $title 准备执行") //(bizId=" + bizId + ")
 
-                var sleepTime = Random.nextInt(2000, 15001)
-                if (title.contains("15秒") || title.contains("15s")) {
-                    sleepTime = Random.nextInt(2000, 15001)
-                }
-                delay(sleepTime.toLong())
+                val sleepTime = Random.nextLong(2000, 5001)
+                delay(sleepTime)
 
                 try {
                     val adFinishRes = AntMemberRpcCall.taskFinish(bizId)
@@ -2180,11 +2177,8 @@ class AntMember : ModelTask() {
 
             AntMemberRpcCall.feedBackSesameTask(templateId)
 
-            var sleepTime = Random.nextInt(2000, 15001)
-            if (title.contains("浏览") || title.contains("逛")) {
-                sleepTime = Random.nextInt(2000, 15001)
-            }
-            delay(sleepTime.toLong())
+            val sleepTime = Random.nextLong(2000, 5001)
+            delay(sleepTime)
 
             if (!recordId.isEmpty()) {
                 val finishRes = AntMemberRpcCall.finishSesameTask(recordId)
@@ -2334,7 +2328,7 @@ class AntMember : ModelTask() {
         return try {
             // 发送"去完成"指令
             if (doTaskAction(taskId, "send")) {
-                val waitTime = 16000L // 默认等待16秒，覆盖大多数浏览任务
+                val waitTime = Random.nextLong(2000, 5001) // 随机等待2-5秒模拟浏览
 
                 delay(waitTime)
 
@@ -2983,7 +2977,7 @@ class AntMember : ModelTask() {
                     delay(500)
                     jo = JSONObject(AntMemberRpcCall.actioncode(actionCode))
                     if (ResChecker.checkRes(TAG, jo)) {
-                        delay(Random.nextLong(2000, 15001))
+                        delay(Random.nextLong(2000, 5001))
                         jo = JSONObject(AntMemberRpcCall.produce(actionCode))
                         if (ResChecker.checkRes(TAG, jo)) {
                             Log.other("商家服务🏬[完成任务$title]")

@@ -18,6 +18,7 @@ import fansirsqi.xposed.sesame.task.common.TaskFlowPhase
 import fansirsqi.xposed.sesame.task.common.TaskFlowSnapshot
 import fansirsqi.xposed.sesame.task.common.TaskRpcFailureType
 import fansirsqi.xposed.sesame.util.GlobalThreadPools
+import kotlin.random.Random
 import fansirsqi.xposed.sesame.util.Log
 import fansirsqi.xposed.sesame.util.ResChecker
 import fansirsqi.xposed.sesame.util.maps.IdMapManager
@@ -842,7 +843,7 @@ class AntFishPond : ModelTask() {
                 } else if (rodCount > 0) {
                     rodCount -= 1
                 }
-                GlobalThreadPools.sleepCompat(SHORT_INTERVAL_MS)
+                GlobalThreadPools.sleepCompat(Random.nextLong(FISH_INTERVAL_MIN_MS, FISH_INTERVAL_MAX_MS + 1))
                 continue
             }
 
@@ -860,7 +861,7 @@ class AntFishPond : ModelTask() {
                 rodCount = extractRodCount(angleJson).takeIf { it >= 0 } ?: (rodCount - 1)
             }
 
-            GlobalThreadPools.sleepCompat(SHORT_INTERVAL_MS)
+            GlobalThreadPools.sleepCompat(Random.nextLong(FISH_INTERVAL_MIN_MS, FISH_INTERVAL_MAX_MS + 1))
         }
 
         if (limit > 0 && usedToday >= limit) {
@@ -1289,6 +1290,8 @@ class AntFishPond : ModelTask() {
         private const val TASK_GO_FISH = "FISH_TASK_14"
         private const val DEFAULT_FISH_LIMIT = 30
         private const val SHORT_INTERVAL_MS = 500L
+    private const val FISH_INTERVAL_MIN_MS = 2000L
+    private const val FISH_INTERVAL_MAX_MS = 5000L
         private const val ACTIVITY_GIFT_BOX = "GIFT_BOX"
         private const val ACTIVITY_TOMORROW_ROD = "TOMORROW_ROD"
         private const val ACTIVITY_FISH = "FISH_ACTIVITY"

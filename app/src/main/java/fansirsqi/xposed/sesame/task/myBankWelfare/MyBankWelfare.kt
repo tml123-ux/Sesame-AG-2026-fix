@@ -7,8 +7,10 @@ import fansirsqi.xposed.sesame.model.ModelFields
 import fansirsqi.xposed.sesame.model.ModelGroup
 import fansirsqi.xposed.sesame.model.modelFieldExt.BooleanModelField
 import fansirsqi.xposed.sesame.task.ModelTask
+import fansirsqi.xposed.sesame.util.GlobalThreadPools
 import fansirsqi.xposed.sesame.util.JsonUtil
 import fansirsqi.xposed.sesame.util.Log
+import kotlin.random.Random
 import org.json.JSONObject
 import java.math.BigDecimal
 import java.math.RoundingMode
@@ -20,6 +22,8 @@ class MyBankWelfare : ModelTask() {
         private const val DISPLAY_NAME = "网商银行"
         private const val BUSINESS_NAME = "网商银行福利金"
         private const val TASK_CENTER_ID = "AP1269301"
+        private const val BROWSE_INTERVAL_MIN_MS = 2000L
+        private const val BROWSE_INTERVAL_MAX_MS = 5000L
         private val SUPPORTED_TRIGGER_TYPES = setOf("USER_TRIGGER", "EVENT_TRIGGER")
     }
 
@@ -99,7 +103,8 @@ class MyBankWelfare : ModelTask() {
                 return
             }
             val taskDetailList = jo.optJSONObject("result")?.optJSONArray("taskDetailList") ?: return
-            for (i in 0 until taskDetailList.length()) {
+            val taskCount = taskDetailList.length()
+            for (i in 0 until taskCount) {
                 val taskDetail = taskDetailList.optJSONObject(i) ?: continue
                 val taskId = taskDetail.optString("taskId").trim()
                 val taskTitle = taskDetail.optString("taskTitle").trim().ifBlank { taskId }
@@ -115,10 +120,14 @@ class MyBankWelfare : ModelTask() {
                     "NONE_SIGNUP", "SIGNUP_COMPLETE" -> {
                         if (status.uppercase() == "NONE_SIGNUP") {
                             triggerAndLog(taskId, taskTitle, "signup")
+                            GlobalThreadPools.sleepCompat(Random.nextLong(BROWSE_INTERVAL_MIN_MS, BROWSE_INTERVAL_MAX_MS + 1))
                         }
                         triggerAndLog(taskId, taskTitle, "send")
                     }
                     else -> { /* skip already completed or unknown status */ }
+                }
+                if (i < taskCount - 1) {
+                    GlobalThreadPools.sleepCompat(Random.nextLong(BROWSE_INTERVAL_MIN_MS, BROWSE_INTERVAL_MAX_MS + 1))
                 }
             }
         } catch (t: Throwable) {
