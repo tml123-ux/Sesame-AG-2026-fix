@@ -138,14 +138,10 @@ object SliderBypassHelper {
             try {
                 val result = performAutoSlideGesture(activity)
                 if (!result) {
-                    Log.record(TAG, "自动滑动未找到滑块视图，关闭页面")
-                    slideExecutor.schedule({
-                        try { activity.finish() } catch (_: Throwable) {}
-                    }, 500, TimeUnit.MILLISECONDS)
+                    Log.record(TAG, "自动滑动未找到滑块视图，保持页面等待手动操作")
                 }
             } catch (e: Throwable) {
-                Log.record(TAG, "自动滑动异常: ${e.message}")
-                try { activity.finish() } catch (_: Throwable) {}
+                Log.record(TAG, "自动滑动异常: ${e.message}，保持页面等待手动操作")
             }
         }, delayMs, TimeUnit.MILLISECONDS)
     }
