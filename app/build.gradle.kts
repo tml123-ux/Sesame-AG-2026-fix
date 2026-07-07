@@ -191,9 +191,9 @@ dependencies {
 
     // 仅编译时依赖 - Xposed 相关
     compileOnly(files("libs/api-82.jar"))          // Xposed API 82
-    compileOnly(files("libs/api-100.aar"))         // Xposed API 100 https://github.com/libxposed/api
-    implementation(files("libs/interface-100.aar")) // Xposed 模块接口 https://github.com/libxposed/api
-    implementation(files("libs/service-100-1.0.0.aar"))  // https://github.com/libxposed/service
+    compileOnly("io.github.libxposed:api:101.0.1")          // Xposed API 101 https://github.com/libxposed/api
+    implementation("io.github.libxposed:interface:101.0.0") // Xposed 模块接口 https://github.com/libxposed/api
+    implementation("io.github.libxposed:service:101.0.0")  // https://github.com/libxposed/service
 
     // 代码生成和工具库
     compileOnly(libs.lombok)                       // Lombok 注解处理器（编译时）

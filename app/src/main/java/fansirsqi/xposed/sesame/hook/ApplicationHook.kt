@@ -141,11 +141,11 @@ class ApplicationHook {
 
     // --- 入口方法 ---
     fun loadPackage(lpparam: PackageLoadedParam) {
-        if (General.PACKAGE_NAME != lpparam.packageName) return
+        if (General.PACKAGE_NAME != lpparam.getPackageName()) return
         handleHookLogic(
-            lpparam.classLoader,
-            lpparam.packageName,
-            lpparam.applicationInfo.sourceDir,
+            lpparam.getDefaultClassLoader(),
+            lpparam.getPackageName(),
+            lpparam.getApplicationInfo().sourceDir,
             lpparam
         )
     }
