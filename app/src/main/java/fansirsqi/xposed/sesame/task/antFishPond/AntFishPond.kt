@@ -761,7 +761,10 @@ class AntFishPond : ModelTask() {
         Status.removeFlag(StatusFlags.FLAG_ANTFISHPOND_RISK_TOKEN_MISSING)
 
         var indexJson = queryIndex(logProgress = true) ?: return false
-        indexJson = exchangeRewardAndReloadIndex(indexJson, "自动钓鱼首页") ?: return null
+        val afterPreFishExchange = exchangeRewardAndReloadIndex(indexJson, "自动钓鱼首页")
+        if (afterPreFishExchange != null) {
+            indexJson = afterPreFishExchange
+        }
 
         var rodCount = extractRodCount(indexJson)
         if (rodCount <= 0) {
@@ -785,8 +788,13 @@ class AntFishPond : ModelTask() {
             if (limit > 0 && usedToday >= limit) {
                 break
             }
-            indexJson = exchangeRewardAndReloadIndex(indexJson, "自动钓鱼首页") ?: return null
-            rodCount = extractRodCount(indexJson)
+            val afterExchange = exchangeRewardAndReloadIndex(indexJson, "自动钓鱼首页")
+            if (afterExchange != null) {
+                indexJson = afterExchange
+                rodCount = extractRodCount(indexJson)
+            } else {
+                if (rodCount > 0) rodCount -= 1
+            }
             if (rodCount <= 0) {
                 break
             }
@@ -827,17 +835,27 @@ class AntFishPond : ModelTask() {
                 else -> null
             }
             if (exchangeSource != null) {
-                indexJson = exchangeRewardAndReloadIndex(exchangeSource, "钓鱼结果") ?: return null
-                rodCount = extractRodCount(indexJson)
+                val afterFishExchange = exchangeRewardAndReloadIndex(exchangeSource, "钓鱼结果")
+                if (afterFishExchange != null) {
+                    indexJson = afterFishExchange
+                    rodCount = extractRodCount(indexJson)
+                } else if (rodCount > 0) {
+                    rodCount -= 1
+                }
                 GlobalThreadPools.sleepCompat(SHORT_INTERVAL_MS)
                 continue
             }
 
             val syncJson = syncAfterFish()
             if (syncJson != null) {
-                indexJson = exchangeRewardAndReloadIndex(syncJson, "钓鱼后刷新") ?: return null
-                rodCount = extractRodCount(indexJson)
-                logFishProgress(indexJson)
+                val afterSyncExchange = exchangeRewardAndReloadIndex(syncJson, "钓鱼后刷新")
+                if (afterSyncExchange != null) {
+                    indexJson = afterSyncExchange
+                    rodCount = extractRodCount(indexJson)
+                    logFishProgress(indexJson)
+                } else if (rodCount > 0) {
+                    rodCount -= 1
+                }
             } else {
                 rodCount = extractRodCount(angleJson).takeIf { it >= 0 } ?: (rodCount - 1)
             }

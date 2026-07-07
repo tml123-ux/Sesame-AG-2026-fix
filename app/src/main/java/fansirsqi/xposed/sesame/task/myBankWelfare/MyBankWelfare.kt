@@ -109,6 +109,9 @@ class MyBankWelfare : ModelTask() {
                     continue
                 }
                 when (status.uppercase()) {
+                    "TO_RECEIVE" -> {
+                        triggerAndLog(taskId, taskTitle, "receive")
+                    }
                     "NONE_SIGNUP", "SIGNUP_COMPLETE" -> {
                         if (status.uppercase() == "NONE_SIGNUP") {
                             triggerAndLog(taskId, taskTitle, "signup")
@@ -135,6 +138,7 @@ class MyBankWelfare : ModelTask() {
                 val actionText = when (stageCode) {
                     "signup" -> "报名完成"
                     "send" -> "奖励发放完成"
+                    "receive" -> "奖励领取完成"
                     else -> "处理成功"
                 }
                 Log.member("${BUSINESS_NAME}🎯[$taskTitle]$actionText")
