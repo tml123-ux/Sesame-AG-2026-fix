@@ -97,12 +97,20 @@ object SliderBypassHelper {
                                 url.contains("slideVerify") || url.contains("dragVerify")
                             val isOtherVerify = url.contains("security") || url.contains("verify") ||
                                 url.contains("risk") || url.contains("safePay")
+                            val isAccessDenied = url.contains("accessDeny") || url.contains("denied") ||
+                                url.contains("forbidden") || url.contains("requestfailure") ||
+                                url.contains("noPermission") || url.contains("networkBlock") ||
+                                url.contains("errorpage") || url.contains("vpnDetect") ||
+                                url.contains("proxyCheck") || url.contains("accessRefuse")
 
                             if (isSliderPage) {
                                 Log.record(TAG, "检测到滑块验证页面，启动自动滑动: $className")
                                 scheduleAutoSlide(activity, 800)
                             } else if (isOtherVerify) {
                                 Log.record(TAG, "拦截非滑块验证页面: $className url=$url")
+                                activity.finish()
+                            } else if (isAccessDenied) {
+                                Log.record(TAG, "拦截访问被拒绝/VPN检测页面: $className url=$url")
                                 activity.finish()
                             } else {
                                 checkEmbeddedContainer(activity)
@@ -462,9 +470,19 @@ object SliderBypassHelper {
                                 url.contains("slidingVerify") ||
                                 url.contains("captcha") ||
                                 url.contains("riskVerify") ||
-                                url.contains("ariver/verify")
+                                url.contains("ariver/verify") ||
+                                url.contains("accessDeny") ||
+                                url.contains("denied") ||
+                                url.contains("forbidden") ||
+                                url.contains("requestfailure") ||
+                                url.contains("noPermission") ||
+                                url.contains("networkBlock") ||
+                                url.contains("errorpage") ||
+                                url.contains("vpnDetect") ||
+                                url.contains("proxyCheck") ||
+                                url.contains("accessRefuse")
                             ) {
-                                Log.record(TAG, "H5BasePage 拦截安全验证页面: $url")
+                                Log.record(TAG, "H5BasePage 拦截安全验证/拒绝访问页面: $url")
                                 param.result = null
                             }
                         }
@@ -488,9 +506,19 @@ object SliderBypassHelper {
                                     url.contains("slidingVerify") ||
                                     url.contains("captcha") ||
                                     url.contains("riskVerify") ||
-                                    url.contains("ariver/verify")
+                                    url.contains("ariver/verify") ||
+                                    url.contains("accessDeny") ||
+                                    url.contains("denied") ||
+                                    url.contains("forbidden") ||
+                                    url.contains("requestfailure") ||
+                                    url.contains("noPermission") ||
+                                    url.contains("networkBlock") ||
+                                    url.contains("errorpage") ||
+                                    url.contains("vpnDetect") ||
+                                    url.contains("proxyCheck") ||
+                                    url.contains("accessRefuse")
                                 ) {
-                                    Log.record(TAG, "H5WebView 拦截安全验证页面: $url")
+                                    Log.record(TAG, "H5WebView 拦截安全验证/拒绝访问页面: $url")
                                     param.result = null
                                 }
                             }

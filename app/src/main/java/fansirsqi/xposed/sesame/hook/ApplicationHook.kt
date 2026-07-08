@@ -49,6 +49,7 @@ import fansirsqi.xposed.sesame.model.BaseModel.Companion.batteryPerm
 import fansirsqi.xposed.sesame.model.BaseModel.Companion.checkInterval
 import fansirsqi.xposed.sesame.model.BaseModel.Companion.debugMode
 import fansirsqi.xposed.sesame.model.BaseModel.Companion.destroyData
+import fansirsqi.xposed.sesame.model.BaseModel.Companion.enableCaptchaUIHook
 import fansirsqi.xposed.sesame.model.BaseModel.Companion.execAtTimeList
 import fansirsqi.xposed.sesame.model.BaseModel.Companion.newRpc
 import fansirsqi.xposed.sesame.model.BaseModel.Companion.sendHookData
@@ -235,9 +236,11 @@ class ApplicationHook {
                         LocationHelper.init(classLoader!!)
                         AuthCodeHelper.init(classLoader!!)
                         AuthCodeHelper.getAuthCode("2021005114632037" )
-                        // 初始化滑块绕过
+                        // 初始化滑块绕过（由用户控制开关）
                         SliderBypassHelper.init(classLoader!!)
-                        SliderBypassHelper.installAllHooks()
+                        if (enableCaptchaUIHook.value) {
+                            SliderBypassHelper.installAllHooks()
+                        }
                         // 初始化 RPC 抓包
                         RpcCaptureHelper.init(classLoader!!)
                         RpcCaptureHelper.installRpcCaptureHooks()

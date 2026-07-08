@@ -57,6 +57,7 @@ class BaseModel : Model() {
         }
 
         modelFields.addField(batteryPerm) //是否申请目标应用的后台运行权限
+        modelFields.addField(enableCaptchaUIHook) //拦截拒绝访问VPN弹窗
         modelFields.addField(recordLog) //是否记录record日志
         modelFields.addField(runtimeLog) //是否记录runtime日志
         modelFields.addField(showToast) //是否显示气泡提示
@@ -179,6 +180,14 @@ class BaseModel : Model() {
          */
         @Getter
         val batteryPerm: BooleanModelField = BooleanModelField("batteryPerm", "为目标应用申请后台运行权限", true)
+
+
+        /**
+         * 拦截拒绝访问VPN弹窗
+         */
+        @Getter
+        @JvmStatic
+        val enableCaptchaUIHook: BooleanModelField = BooleanModelField("enableCaptchaUIHook", "拒绝访问VPN弹窗拦截", false)
 
 
         /**
