@@ -31,6 +31,11 @@ object TokenHooker {
             handleAntFarmToken(currentUserId, paramsJson)
         }
 
+        // 注册福气鱼池 fishpondAngle riskToken 抓取
+        registerRpcHandler("com.alipay.antfishpond.fishpondAngle") { paramsJson ->
+            handleFishpondRiskToken(currentUserId, paramsJson)
+        }
+
         Log.record(TAG, "✅ VIP业务监听已启动，当前绑定用户: $currentUserId")
     }
 
@@ -81,6 +86,39 @@ object TokenHooker {
 
         } catch (e: Exception) {
             Log.error(TAG, "解析 referToken 异常: ${e.message}")
+        }
+    }
+
+    /**
+     * 福气鱼池风险 token 捕获
+     * 每次手动钓鱼时捕获 fishpondAngle RPC 请求中的 riskToken
+     */
+    private fun handleFishpondRiskToken(userId: String, paramsJson: JSONObject) {
+        try {
+            val riskToken = paramsJson.optString("riskToken", "")
+            if (riskToken.isEmpty()) {
+                Log.error(TAG, "fishpondAngle riskToken 为空")
+                return
+            }
+
+            val vipData = IdMapManager.getInstance(VipDataIdMap::class.java)
+            vipData.load(userId)
+
+            // 只在新 token 与旧 token 不同时才保存，避免频繁写文件
+            val oldToken = vipData["antfishpond_riskToken"].orEmpty()
+            if (riskToken == oldToken) {
+                return
+            }
+
+            vipData.add("antfishpond_riskToken", riskToken)
+
+            if (vipData.save(userId)) {
+                Log.other(TAG, "🎣 捕获到福气鱼池 riskToken 并已保存, uid=$userId")
+            } else {
+                Log.error(TAG, "保存 vipdata.json 失败, uid=$userId")
+            }
+        } catch (e: Exception) {
+            Log.error(TAG, "解析 fishpondAngle riskToken 异常: ${e.message}")
         }
     }
 }
