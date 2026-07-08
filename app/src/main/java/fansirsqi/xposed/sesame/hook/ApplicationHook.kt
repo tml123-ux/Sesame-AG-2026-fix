@@ -663,9 +663,11 @@ class ApplicationHook {
                     rpcVersion = rpcBridge!!.getVersion()
                 }
 
-                if (newRpc.value && debugMode.value) {
+                if (newRpc.value) {
                     HookUtil.hookRpcBridgeExtension(classLoader!!, sendHookData.value, sendHookDataUrl.value)
-                    HookUtil.hookDefaultBridgeCallback(classLoader!!)
+                    if (debugMode.value) {
+                        HookUtil.hookDefaultBridgeCallback(classLoader!!)
+                    }
                 }
 
                 start(userId)

@@ -51,20 +51,21 @@ object SliderBypassHelper {
             // 4. Hook antcaptcha.verify - 绕过滑块验证 RPC
             hookAntCaptcha(loader)
 
+            // 以下弹窗自动关闭已禁用（用户要求保留支付宝原生弹窗行为）
             // 5. Hook 风险提示弹窗
-            hookRiskDialog(loader)
+            // hookRiskDialog(loader)
 
             // 6. Hook 广告/促销弹窗自动关闭
-            hookAdPromotionDialog(loader)
+            // hookAdPromotionDialog(loader)
 
             // 7. Hook 权限请求弹窗自动关闭
-            hookPermissionDialog(loader)
+            // hookPermissionDialog(loader)
 
             // 8. Hook 版本更新弹窗自动关闭
-            hookUpdateDialog(loader)
+            // hookUpdateDialog(loader)
 
             // 9. Hook 通用Dialog.show()自动关闭已知弹窗
-            hookGeneralDialogDismiss(loader)
+            // hookGeneralDialogDismiss(loader)
 
             hookInstalled = true
             Log.record(TAG, "所有滑块绕过 Hook 安装成功")
