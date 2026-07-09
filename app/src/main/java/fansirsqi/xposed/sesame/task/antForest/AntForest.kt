@@ -38,6 +38,7 @@ import fansirsqi.xposed.sesame.task.antForest.ForestUtil.hasBombCard
 import fansirsqi.xposed.sesame.task.antForest.ForestUtil.hasShield
 import fansirsqi.xposed.sesame.task.antForest.Privilege.studentSignInRedEnvelope
 import fansirsqi.xposed.sesame.task.antForest.Privilege.youthPrivilege
+import fansirsqi.xposed.sesame.task.exchange.ExchangeReplenisher
 import fansirsqi.xposed.sesame.ui.ObjReference
 import fansirsqi.xposed.sesame.util.Average
 import fansirsqi.xposed.sesame.util.GlobalThreadPools
@@ -829,6 +830,11 @@ class AntForest : ModelTask(), EnergyCollectCallback {
             // 先查询主页，更新道具状态（双击卡、保护罩等的剩余时间）
             updateSelfHomePage()
             tc.countDebug("查询道具状态")
+
+            ExchangeReplenisher.replenish("forest_double")
+            ExchangeReplenisher.replenish("forest_shield")
+            ExchangeReplenisher.replenish("forest_patrol")
+            ExchangeReplenisher.replenish("forest_accelerate")
 
             usePropBeforeCollectEnergy(selfId)
             tc.countDebug("使用自己道具卡")

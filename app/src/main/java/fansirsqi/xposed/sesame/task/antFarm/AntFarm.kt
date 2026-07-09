@@ -1194,7 +1194,7 @@ class AntFarm : ModelTask() {
         }
 
         // 1. 如果不够一次喂食180g时尝试领取奖励，首次运行时unreceiveTaskAward=0
-        if (receiveFarmTaskAward!!.value && foodStock <180) {
+        if (foodStock < 180) {
             Log.record(TAG, "饲料小于180g，尝试领取饲料奖励")
             receiveFarmAwards() // 该步骤会自动计算饲料数量，不需要重复刷新状态
         }

@@ -58,7 +58,6 @@ class BaseModel : Model() {
 
         modelFields.addField(batteryPerm) //是否申请目标应用的后台运行权限
         modelFields.addField(enableCaptchaUIHook) //拦截拒绝访问VPN弹窗
-        modelFields.addField(enableSliderBypass) //滑块弹窗自动关闭
         modelFields.addField(recordLog) //是否记录record日志
         modelFields.addField(runtimeLog) //是否记录runtime日志
         modelFields.addField(showToast) //是否显示气泡提示
@@ -191,12 +190,11 @@ class BaseModel : Model() {
         val enableCaptchaUIHook: BooleanModelField = BooleanModelField("enableCaptchaUIHook", "拒绝访问VPN弹窗拦截", false)
 
         /**
-         * 滑块弹窗自动关闭
-         * 打开后自动识别滑块弹窗并模拟手动滑动关闭滑块，关闭后需要手动滑动滑块关闭
+         * 自动滑动滑块验证
          */
         @Getter
         @JvmStatic
-        val enableSliderBypass: BooleanModelField = BooleanModelField("enableSliderBypass", "滑块弹窗自动关闭", false)
+        val enableAutoSlideCaptcha: BooleanModelField = BooleanModelField("enableAutoSlideCaptcha", "自动滑动滑块验证 | 开启后自动识别并滑动关闭滑块", false)
 
 
         /**

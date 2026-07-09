@@ -1,8 +1,9 @@
 package fansirsqi.xposed.sesame.task.exchange
 
-import fansirsqi.xposed.sesame.data.Status
+import fansirsqi.xposed.sesame.model.Model
 import fansirsqi.xposed.sesame.task.antForest.Vitality
 import fansirsqi.xposed.sesame.util.Log
+import org.json.JSONObject
 
 object ExchangeReplenisher {
     private const val TAG = "ExchangeReplenisher"
@@ -14,132 +15,92 @@ object ExchangeReplenisher {
         NOT_AVAILABLE
     }
 
-    /**
-     * 补充资源 - 通过各种渠道自动兑换道具
-     * @param effectNeed 需要的资源类型
-     * @return 补充结果
-     */
     fun replenish(effectNeed: String): ExchangeReplenishResult {
         Log.record(TAG, "尝试补充资源: $effectNeed")
 
         return when (effectNeed) {
-            "forest_double" -> tryExchangeDoubleCard()
-            "forest_patrol" -> tryExchangePatrol()
-            "forest_shield" -> tryExchangeShield()
-            "forest_stealth" -> tryExchangeStealthCard()
-            "forest_accelerate" -> tryExchangeAccelerate()
-            "farm_feed" -> tryExchangeFarmFeed()
-            "forest_bomb" -> tryExchangeEnergyBombCard()
+            "forest_double", "forest_patrol", "forest_shield", "forest_accelerate" -> {
+                tryForestExchange(effectNeed)
+            }
+            "farm_feed" -> {
+                tryFarmExchange(effectNeed)
+            }
+            "orchard_manure" -> {
+                tryMemberExchange(effectNeed)
+            }
             else -> ExchangeReplenishResult.NOT_AVAILABLE
         }
     }
 
-    private fun tryExchangeDoubleCard(): ExchangeReplenishResult {
+    private fun tryForestExchange(effectNeed: String): ExchangeReplenishResult {
         try {
-            Vitality.initVitality("SC_ASSETS")
-            if (Vitality.handleVitalityExchange("SK20240805004754")) {
-                Log.forest("活力兑换🍃[双击卡]兑换成功")
-                return ExchangeReplenishResult.SUCCESS
-            }
-            if (Vitality.handleVitalityExchange("CR20230516000363")) {
-                Log.forest("活力兑换🍃[限时双击卡]兑换成功")
-                return ExchangeReplenishResult.SUCCESS
-            }
-            return ExchangeReplenishResult.FAILED
-        } catch (e: Exception) {
-            Log.printStackTrace(TAG, "双击卡兑换异常", e)
-        }
-        return ExchangeReplenishResult.FAILED
-    }
+            Log.record(TAG, "尝试森林模块兑换: $effectNeed")
 
-    private fun tryExchangePatrol(): ExchangeReplenishResult {
-        try {
             Vitality.initVitality("SC_ASSETS")
-            val skuId = "CR20230516000371"
-            val spuId = "CR20230517000497"
-            if (Status.canVitalityExchangeToday(skuId, 1) &&
-                Vitality.VitalityExchange(spuId, skuId, "巡护次数")
-            ) {
-                Log.forest("活力兑换🍃[巡护次数]兑换成功")
-                return ExchangeReplenishResult.SUCCESS
-            }
-            return ExchangeReplenishResult.FAILED
-        } catch (e: Exception) {
-            Log.printStackTrace(TAG, "巡护次数兑换异常", e)
-        }
-        return ExchangeReplenishResult.FAILED
-    }
 
-    private fun tryExchangeShield(): ExchangeReplenishResult {
-        try {
-            Vitality.initVitality("SC_ASSETS")
-            val skuId = "CR20230516000370"
-            val spuId = "CR20230517000497"
-            if (Status.canVitalityExchangeToday(skuId, 1) &&
-                Vitality.VitalityExchange(spuId, skuId, "保护罩")
-            ) {
-                Log.forest("活力兑换🍃[保护罩]兑换成功")
-                return ExchangeReplenishResult.SUCCESS
+            val skuIds = when (effectNeed) {
+                "forest_double" -> listOf("CR20240805004754", "SK20240805004754")
+                "forest_shield" -> listOf("CR20230516000363", "SK20230516000363")
+                "forest_patrol" -> listOf("SK20240805004754", "CR20240805004754")
+                "forest_accelerate" -> listOf("CR20240805004754", "SK20240805004754")
+                else -> listOf()
             }
-            return ExchangeReplenishResult.FAILED
-        } catch (e: Exception) {
-            Log.printStackTrace(TAG, "保护罩兑换异常", e)
-        }
-        return ExchangeReplenishResult.FAILED
-    }
 
-    private fun tryExchangeStealthCard(): ExchangeReplenishResult {
-        try {
-            Vitality.initVitality("SC_ASSETS")
-            val skuId = "SK20230521000206"
-            val spuId = "SP20230521000082"
-            if (Status.canVitalityExchangeToday(skuId, 1) &&
-                Vitality.VitalityExchange(spuId, skuId, "隐身卡")
-            ) {
-                Log.forest("活力兑换🍃[隐身卡]兑换成功")
-                return ExchangeReplenishResult.SUCCESS
+            for (skuId in skuIds) {
+                if (Vitality.handleVitalityExchange(skuId)) {
+                    Log.farm("ExchangeReplenisher: 成功兑换森林道具 $effectNeed (SKU: $skuId)")
+                    return ExchangeReplenishResult.SUCCESS
+                }
+                Thread.sleep(500)
             }
-            return ExchangeReplenishResult.FAILED
-        } catch (e: Exception) {
-            Log.printStackTrace(TAG, "隐身卡兑换异常", e)
-        }
-        return ExchangeReplenishResult.FAILED
-    }
 
-    private fun tryExchangeAccelerate(): ExchangeReplenishResult {
-        try {
-            Vitality.initVitality("SC_ASSETS")
-            if (Vitality.handleVitalityExchange("SK20240806000201")) {
-                Log.forest("活力兑换🍃[加速卡]兑换成功")
-                return ExchangeReplenishResult.SUCCESS
-            }
-            return ExchangeReplenishResult.FAILED
+            Log.record(TAG, "ExchangeReplenisher: 森林兑换未找到可用SKU: $effectNeed")
+            return ExchangeReplenishResult.NOT_NEEDED
         } catch (e: Exception) {
-            Log.printStackTrace(TAG, "加速卡兑换异常", e)
+            Log.printStackTrace(TAG, "森林兑换异常", e)
         }
-        return ExchangeReplenishResult.FAILED
-    }
-
-    private fun tryExchangeEnergyBombCard(): ExchangeReplenishResult {
-        try {
-            Vitality.initVitality("SC_ASSETS")
-            val skuId = "CR20240806000311"
-            val spuId = "CR20240806000310"
-            if (Status.canVitalityExchangeToday(skuId, 1) &&
-                Vitality.VitalityExchange(spuId, skuId, "能量炸弹卡")
-            ) {
-                Log.forest("活力兑换🍃[能量炸弹卡]兑换成功")
-                return ExchangeReplenishResult.SUCCESS
-            }
-            return ExchangeReplenishResult.FAILED
-        } catch (e: Exception) {
-            Log.printStackTrace(TAG, "能量炸弹卡兑换异常", e)
-        }
-        return ExchangeReplenishResult.FAILED
-    }
-
-    private fun tryExchangeFarmFeed(): ExchangeReplenishResult {
-        Log.record(TAG, "饲料兑换需通过庄园乐园币兑换实现")
         return ExchangeReplenishResult.NOT_AVAILABLE
+    }
+
+    private fun tryFarmExchange(effectNeed: String): ExchangeReplenishResult {
+        try {
+            Log.record(TAG, "尝试庄园模块兑换: $effectNeed")
+
+            val response = fansirsqi.xposed.sesame.task.antFarm.AntFarmRpcCall.listFarmTask()
+            if (response.isNullOrEmpty()) {
+                Log.record(TAG, "ExchangeReplenisher: 庄园任务列表为空")
+                return ExchangeReplenishResult.NOT_AVAILABLE
+            }
+
+            val jo = JSONObject(response)
+            if (!fansirsqi.xposed.sesame.util.ResChecker.checkRes(TAG, jo)) {
+                return ExchangeReplenishResult.NOT_AVAILABLE
+            }
+
+            val farmTaskList = jo.getJSONArray("farmTaskList")
+            var claimed = false
+            for (i in 0 until farmTaskList.length()) {
+                val task = farmTaskList.getJSONObject(i)
+                val taskStatus = task.getString("taskStatus")
+                if ("FINISHED" == taskStatus) {
+                    val taskId = task.optString("taskId")
+                    val resultJo = JSONObject(fansirsqi.xposed.sesame.task.antFarm.AntFarmRpcCall.receiveFarmTaskAward(taskId))
+                    if (fansirsqi.xposed.sesame.util.ResChecker.checkRes(TAG, resultJo)) {
+                        Log.farm("ExchangeReplenisher: 成功领取庄园任务奖励")
+                        claimed = true
+                    }
+                }
+            }
+
+            return if (claimed) ExchangeReplenishResult.SUCCESS else ExchangeReplenishResult.NOT_NEEDED
+        } catch (e: Exception) {
+            Log.printStackTrace(TAG, "庄园兑换异常", e)
+        }
+        return ExchangeReplenishResult.NOT_AVAILABLE
+    }
+
+    private fun tryMemberExchange(effectNeed: String): ExchangeReplenishResult {
+        Log.record(TAG, "尝试会员模块兑换: $effectNeed")
+        return ExchangeReplenishResult.NOT_NEEDED
     }
 }
