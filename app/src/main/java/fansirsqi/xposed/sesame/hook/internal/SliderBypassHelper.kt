@@ -3,7 +3,6 @@ package fansirsqi.xposed.sesame.hook.internal
 import android.os.SystemClock
 import android.view.MotionEvent
 import android.view.View
-import android.view.ViewGroup
 import de.robv.android.xposed.XC_MethodHook
 import de.robv.android.xposed.XC_MethodReplacement
 import de.robv.android.xposed.XposedHelpers
@@ -108,8 +107,8 @@ object SliderBypassHelper {
                             val intent = activity.intent
                             val url = intent?.dataString ?: intent?.getStringExtra("url") ?: ""
 
-                            val isSliderPage = url.contains("slider") || url.contains("captcha") ||
-                                url.contains("slideVerify") || url.contains("dragVerify")
+                            val isSliderPage = url.contains("slider") || url.contains("slideVerify") ||
+                                url.contains("dragVerify")
                             val isOtherVerify = url.contains("security") || url.contains("verify") ||
                                 url.contains("risk") || url.contains("safePay")
                             val isAccessDenied = url.contains("accessDeny") || url.contains("denied") ||
@@ -120,15 +119,13 @@ object SliderBypassHelper {
 
                             if (isSliderPage && sliderBypassEnabled) {
                                 Log.record(TAG, "检测到滑块验证页面，启动自动滑动: $className")
-                                scheduleAutoSlide(activity, 800)
+                                scheduleAutoSlideOnActivity(activity, 1000)
                             } else if (isOtherVerify && captchaUIHookEnabled) {
                                 Log.record(TAG, "拦截非滑块验证页面: $className url=$url")
                                 activity.finish()
                             } else if (isAccessDenied && captchaUIHookEnabled) {
                                 Log.record(TAG, "拦截访问被拒绝/VPN检测页面: $className url=$url")
                                 activity.finish()
-                            } else if (sliderBypassEnabled) {
-                                checkEmbeddedContainer(activity)
                             }
                         } catch (_: Throwable) {}
                     }
@@ -139,204 +136,37 @@ object SliderBypassHelper {
         }
     }
 
-    private fun checkEmbeddedContainer(activity: android.app.Activity) {
-        try {
-            val decorView = activity.window?.decorView ?: return
-            val containerId = decorView.context.resources.getIdentifier(
-                "embeded_fragment_container", "id",
-                "com.alipay.multiplatform.phone.xriver_integration"
-            )
-            if (containerId != 0 && decorView.findViewById<View>(containerId) != null) {
-                Log.record(TAG, "检测到验证码容器，尝试自动滑动")
-                scheduleAutoSlide(activity, 1000)
-            }
-        } catch (_: Throwable) {}
-    }
-
     /**
-     * 调度自动滑动任务
-     * @param delayMs 延迟毫秒数，等待页面渲染完成
+     * 调度自动滑动任务（基于Activity窗口坐标，兼容WebView渲染的滑块）
      */
-    private fun scheduleAutoSlide(activity: android.app.Activity, delayMs: Long) {
+    private fun scheduleAutoSlideOnActivity(activity: android.app.Activity, delayMs: Long) {
         slideExecutor.schedule({
             try {
-                val result = performAutoSlideGesture(activity)
-                if (!result) {
-                    Log.record(TAG, "自动滑动未找到滑块视图，保持页面等待手动操作")
-                }
+                val view = activity.window?.decorView ?: return@schedule
+                val screenWidth = view.width.toFloat()
+                val screenHeight = view.height.toFloat()
+                if (screenWidth <= 0 || screenHeight <= 0) return@schedule
+
+                val startX = screenWidth * 0.15f
+                val endX = screenWidth * 0.85f
+                val y = screenHeight * 0.72f
+                val slideDistance = endX - startX
+
+                if (slideDistance <= 0) return@schedule
+
+                Log.record(TAG, "窗口级触摸滑动: startX=$startX endX=$endX y=$y distance=$slideDistance")
+                executeTouchGestureOnView(view, startX, y, slideDistance)
+                Log.record(TAG, "窗口级自动滑动完成")
             } catch (e: Throwable) {
-                Log.record(TAG, "自动滑动异常: ${e.message}，保持页面等待手动操作")
+                Log.record(TAG, "窗口级自动滑动异常: ${e.message}，保持页面等待手动操作")
             }
         }, delayMs, TimeUnit.MILLISECONDS)
     }
 
     /**
-     * 执行自动滑动验证手势
-     * @return true if slide was performed, false if no slider found
+     * 在指定View上执行水平触摸滑动手势（适用于Activity/DecorView级别分派）
      */
-    private fun performAutoSlideGesture(activity: android.app.Activity): Boolean {
-        val decorView = activity.window?.decorView ?: return false
-        val sliderView = findSliderThumbView(decorView)
-        if (sliderView == null) {
-            Log.record(TAG, "未找到滑块拖拽控件")
-            return false
-        }
-
-        val containerView = findSliderContainer(decorView, sliderView)
-        val slideDistance: Float
-
-        if (containerView != null) {
-            slideDistance = computeSlideDistance(containerView, sliderView)
-        } else {
-            slideDistance = decorView.width * 0.62f
-        }
-
-        if (slideDistance <= 0) {
-            Log.record(TAG, "滑动距离计算异常: $slideDistance")
-            return false
-        }
-
-        Log.record(TAG, "开始自动滑动: distance=$slideDistance px, slider=${sliderView.javaClass.name}")
-        executeTouchGesture(sliderView, slideDistance)
-        Log.record(TAG, "自动滑动完成")
-        return true
-    }
-
-    /**
-     * 在视图树中递归搜索滑块控件
-     */
-    private fun findSliderThumbView(root: View): View? {
-        val sliderClassKeywords = arrayOf(
-            "Slider", "Slide", "Drag", "Thumb",
-            "Captcha", "Verify", "Seek"
-        )
-        val sliderIdKeywords = arrayOf(
-            "slider", "slide", "thumb", "drag",
-            "captcha", "verify", "seek", "btn"
-        )
-        val candidateViews = mutableListOf<View>()
-
-        collectSliderCandidates(root, sliderClassKeywords, sliderIdKeywords, candidateViews)
-
-        if (candidateViews.isEmpty()) {
-            Log.record(TAG, "无候选滑块视图，尝试全树搜索")
-            collectAllClickableViews(root, candidateViews)
-            candidateViews.sortBy { v ->
-                val loc = IntArray(2)
-                v.getLocationOnScreen(loc)
-                loc[0]
-            }
-        } else {
-            candidateViews.sortBy { v ->
-                val loc = IntArray(2)
-                v.getLocationOnScreen(loc)
-                loc[0]
-            }
-            val firstX = IntArray(2).also { candidateViews.first().getLocationOnScreen(it) }[0]
-            if (firstX > root.width * 0.4f) {
-                candidateViews.sortBy { v ->
-                    val loc = IntArray(2)
-                    v.getLocationOnScreen(loc)
-                    -loc[0]
-                }
-            }
-        }
-
-        return candidateViews.firstOrNull { v ->
-            val loc = IntArray(2)
-            v.getLocationOnScreen(loc)
-            v.width > 0 && v.height > 0 && loc[1] > 0
-        }
-    }
-
-    private fun collectSliderCandidates(
-        view: View,
-        classKeywords: Array<String>,
-        idKeywords: Array<String>,
-        candidates: MutableList<View>
-    ) {
-        val className = view.javaClass.name.lowercase()
-        val idName = try {
-            view.resources.getResourceEntryName(view.id).lowercase()
-        } catch (_: Throwable) { "" }
-
-        val matchesClass = classKeywords.any { className.contains(it.lowercase()) }
-        val matchesId = idKeywords.any { idName.contains(it.lowercase()) }
-        val isClickable = view.isClickable || view.isFocusable
-
-        if ((matchesClass || matchesId) && isClickable) {
-            candidates.add(view)
-        }
-
-        if (candidates.size >= 20) return
-
-        if (view is ViewGroup) {
-            for (i in 0 until view.childCount) {
-                val child = view.getChildAt(i) ?: continue
-                collectSliderCandidates(child, classKeywords, idKeywords, candidates)
-            }
-        }
-    }
-
-    private fun collectAllClickableViews(view: View, candidates: MutableList<View>) {
-        if (view.isClickable && view.width in 40..200 && view.height in 40..200) {
-            candidates.add(view)
-        }
-        if (candidates.size >= 50) return
-        if (view is ViewGroup) {
-            for (i in 0 until view.childCount) {
-                val child = view.getChildAt(i) ?: continue
-                collectAllClickableViews(child, candidates)
-            }
-        }
-    }
-
-    /**
-     * 查找滑块容器（滑轨区域）
-     */
-    private fun findSliderContainer(root: View, sliderView: View): View? {
-        var parent = sliderView.parent
-        while (parent != null && parent is View) {
-            val p = parent as View
-            if (p.width in 200..(root.width) && p.height in 40..200) {
-                val bg = p.background
-                if (bg != null) return p
-            }
-            parent = p.parent
-        }
-        return root
-    }
-
-    /**
-     * 计算滑块需要滑动的距离
-     */
-    private fun computeSlideDistance(container: View, sliderView: View): Float {
-        val containerLoc = IntArray(2)
-        val sliderLoc = IntArray(2)
-        container.getLocationOnScreen(containerLoc)
-        sliderView.getLocationOnScreen(sliderLoc)
-
-        val containerRight = containerLoc[0] + container.width
-        val sliderRight = sliderLoc[0] + sliderView.width
-        val rawDistance = (containerRight - sliderRight).toFloat()
-
-        return when {
-            rawDistance <= 0 -> container.width * 0.65f
-            rawDistance > container.width -> container.width * 0.85f
-            else -> rawDistance + sliderView.width * 0.3f
-        }
-    }
-
-    /**
-     * 执行模拟触摸手势滑动
-     * 模拟人类滑动特征: 加速启动 -> 匀速 -> 微调 → 释放
-     */
-    private fun executeTouchGesture(view: View, totalDistance: Float) {
-        val loc = IntArray(2)
-        view.getLocationOnScreen(loc)
-        val startX = loc[0] + view.width / 2f
-        val startY = loc[1] + view.height / 2f
-        val endX = startX + totalDistance
+    private fun executeTouchGestureOnView(view: View, startX: Float, startY: Float, totalDistance: Float) {
         val downTime = SystemClock.uptimeMillis()
 
         val downEvent = MotionEvent.obtain(
@@ -346,25 +176,24 @@ object SliderBypassHelper {
         view.dispatchTouchEvent(downEvent)
         downEvent.recycle()
 
-        val totalSteps = 15 + (5..15).random()
-        val baseStepMs = 6L + (0..4).random()
+        val totalSteps = 18 + (8..12).random()
+        val baseStepMs = 8L + (0..4).random()
         var currentX = startX
         var currentY = startY
-        var eventTime = downTime + 50
+        var eventTime = downTime + 60
 
         for (i in 1..totalSteps) {
             val progress = i.toFloat() / totalSteps
             val easeProgress = easeProgress(progress)
 
             currentX = startX + totalDistance * easeProgress
-
-            val jitter = ((Math.random() - 0.5) * 4).toFloat()
+            val jitter = ((Math.random() - 0.5) * 3).toFloat()
             currentY = startY + jitter
 
             val stepDuration = when {
-                progress < 0.15f -> baseStepMs + (5..12).random()
-                progress < 0.85f -> baseStepMs + (2..6).random()
-                else -> baseStepMs + (10..20).random()
+                progress < 0.15f -> baseStepMs + (8..15).random()
+                progress < 0.85f -> baseStepMs + (3..7).random()
+                else -> baseStepMs + (12..25).random()
             }
             eventTime += stepDuration
 
@@ -378,19 +207,10 @@ object SliderBypassHelper {
             Thread.sleep(stepDuration)
         }
 
-        val overShoot = 3f + (0..5).random()
-        eventTime += 40
-        val lastMoveEvent = MotionEvent.obtain(
-            downTime, eventTime,
-            MotionEvent.ACTION_MOVE, endX + overShoot, startY, 0
-        )
-        view.dispatchTouchEvent(lastMoveEvent)
-        lastMoveEvent.recycle()
-
-        eventTime += 20 + (0..30).random()
+        eventTime += 50
         val upEvent = MotionEvent.obtain(
             downTime, eventTime,
-            MotionEvent.ACTION_UP, endX + overShoot, startY, 0
+            MotionEvent.ACTION_UP, startX + totalDistance, startY, 0
         )
         view.dispatchTouchEvent(upEvent)
         upEvent.recycle()
@@ -483,11 +303,11 @@ object SliderBypassHelper {
                     object : XC_MethodHook() {
                         override fun beforeHookedMethod(param: MethodHookParam) {
                             val url = param.args[0] as? String ?: return
-                            val isSliderUrl = url.contains("securityVerify") ||
-                                url.contains("slidingVerify") ||
-                                url.contains("captcha") ||
-                                url.contains("riskVerify") ||
-                                url.contains("ariver/verify")
+                            val isSliderUrl = url.contains("slidingVerify") ||
+                                url.contains("slideVerify") ||
+                                url.contains("dragVerify")
+                            val isExplicitCaptcha = url.contains("antcaptcha") &&
+                                (url.contains("verify") || url.contains("captcha"))
                             val isBlockUrl = url.contains("accessDeny") ||
                                 url.contains("denied") ||
                                 url.contains("forbidden") ||
@@ -499,8 +319,14 @@ object SliderBypassHelper {
                                 url.contains("proxyCheck") ||
                                 url.contains("accessRefuse")
 
-                            if ((isSliderUrl && sliderBypassEnabled) || (isBlockUrl && captchaUIHookEnabled)) {
-                                Log.record(TAG, "H5BasePage 拦截安全验证/拒绝访问页面: $url")
+                            if (isSliderUrl && sliderBypassEnabled) {
+                                Log.record(TAG, "H5BasePage 拦截滑块验证页面: $url")
+                                param.result = null
+                            } else if (isExplicitCaptcha && sliderBypassEnabled) {
+                                Log.record(TAG, "H5BasePage 拦截antcaptcha验证页面: $url")
+                                param.result = null
+                            } else if (isBlockUrl && captchaUIHookEnabled) {
+                                Log.record(TAG, "H5BasePage 拦截拒绝访问页面: $url")
                                 param.result = null
                             }
                         }
@@ -519,11 +345,11 @@ object SliderBypassHelper {
                         object : XC_MethodHook() {
                             override fun beforeHookedMethod(param: MethodHookParam) {
                                 val url = param.args[0] as? String ?: return
-                                val isSliderUrl = url.contains("securityVerify") ||
-                                    url.contains("slidingVerify") ||
-                                    url.contains("captcha") ||
-                                    url.contains("riskVerify") ||
-                                    url.contains("ariver/verify")
+                                val isSliderUrl = url.contains("slidingVerify") ||
+                                    url.contains("slideVerify") ||
+                                    url.contains("dragVerify")
+                                val isExplicitCaptcha = url.contains("antcaptcha") &&
+                                    (url.contains("verify") || url.contains("captcha"))
                                 val isBlockUrl = url.contains("accessDeny") ||
                                     url.contains("denied") ||
                                     url.contains("forbidden") ||
@@ -535,8 +361,14 @@ object SliderBypassHelper {
                                     url.contains("proxyCheck") ||
                                     url.contains("accessRefuse")
 
-                                if ((isSliderUrl && sliderBypassEnabled) || (isBlockUrl && captchaUIHookEnabled)) {
-                                    Log.record(TAG, "H5WebView 拦截安全验证/拒绝访问页面: $url")
+                                if (isSliderUrl && sliderBypassEnabled) {
+                                    Log.record(TAG, "H5WebView 拦截滑块验证页面: $url")
+                                    param.result = null
+                                } else if (isExplicitCaptcha && sliderBypassEnabled) {
+                                    Log.record(TAG, "H5WebView 拦截antcaptcha验证页面: $url")
+                                    param.result = null
+                                } else if (isBlockUrl && captchaUIHookEnabled) {
+                                    Log.record(TAG, "H5WebView 拦截拒绝访问页面: $url")
                                     param.result = null
                                 }
                             }
