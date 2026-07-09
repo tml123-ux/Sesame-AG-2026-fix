@@ -13,7 +13,28 @@ import fansirsqi.xposed.sesame.util.Log;
 import fansirsqi.xposed.sesame.util.RandomUtil;
 
 public class AntFarmRpcCall {
-    private static final String VERSION = "1.8.2302070202.46";
+    private static String VERSION = "1.8.2601010000.46";
+
+    static {
+        try {
+            fansirsqi.xposed.sesame.entity.AlipayVersion capturedVer =
+                fansirsqi.xposed.sesame.hook.VersionHook.INSTANCE.getCapturedVersion();
+            if (capturedVer != null) {
+                if (capturedVer.compareTo(new fansirsqi.xposed.sesame.entity.AlipayVersion("10.5.60.8100")) >= 0) {
+                    VERSION = "1.8.2601010000.46";
+                } else if (capturedVer.compareTo(new fansirsqi.xposed.sesame.entity.AlipayVersion("10.3.96.8100")) >= 0) {
+                    VERSION = "1.8.2508150000.46";
+                } else if (capturedVer.compareTo(new fansirsqi.xposed.sesame.entity.AlipayVersion("10.3.80.8100")) >= 0) {
+                    VERSION = "1.8.2401010000.46";
+                } else {
+                    VERSION = "1.8.2302070202.46";
+                }
+                Log.record("AntFarmRpcCall", "使用API版本: " + VERSION);
+            }
+        } catch (Exception e) {
+            Log.record("AntFarmRpcCall", "版本初始化异常，使用默认版本: " + VERSION);
+        }
+    }
 
     /**
      * 进入农场

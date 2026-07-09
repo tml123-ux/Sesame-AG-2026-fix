@@ -11,6 +11,7 @@ import fansirsqi.xposed.sesame.entity.OtherEntityProvider.listEcoLifeOptions
 import fansirsqi.xposed.sesame.entity.OtherEntityProvider.listHealthcareOptions
 import fansirsqi.xposed.sesame.entity.VitalityStore
 import fansirsqi.xposed.sesame.entity.VitalityStore.Companion.getNameById
+import fansirsqi.xposed.sesame.task.exchange.ExchangeReplenisher
 import fansirsqi.xposed.sesame.util.GameTask
 import fansirsqi.xposed.sesame.hook.RequestManager.requestString
 import fansirsqi.xposed.sesame.hook.Toast
@@ -188,6 +189,7 @@ class AntForest : ModelTask(), EnergyCollectCallback {
     private var waterFriendCount: IntegerModelField? = null
     private var notifyFriend: BooleanModelField? = null
     private var vitalityExchange: BooleanModelField? = null
+    private var autoExchange: BooleanModelField? = null
     private var userPatrol: BooleanModelField? = null
     private var collectGiftBox: BooleanModelField? = null
     private var medicalHealth: BooleanModelField? = null //医疗健康开关
@@ -614,6 +616,7 @@ class AntForest : ModelTask(), EnergyCollectCallback {
                 VitalityStore::list,
                 "记得填兑换次数..亲爱的"
             ).also { vitalityExchangeList = it })
+        modelFields.addField(BooleanModelField("autoExchange", "自动补充道具 | 兑换开关", false).also { autoExchange = it })
         modelFields.addField(BooleanModelField("userPatrol", "保护地巡护", false).also { userPatrol = it })
         modelFields.addField(BooleanModelField("combineAnimalPiece", "合成动物碎片", false).also { combineAnimalPiece = it })
         modelFields.addField(BooleanModelField("consumeAnimalProp", "派遣动物伙伴", false).also { consumeAnimalProp = it })
@@ -940,6 +943,14 @@ class AntForest : ModelTask(), EnergyCollectCallback {
                 if (vitalityExchange!!.value) {
                     handleVitalityExchange()
                     tc.countDebug("活力值兑换")
+                }
+
+                // 自动补充道具 - 当背包缺少关键道具时尝试兑换
+                if (autoExchange!!.value) {
+                    ExchangeReplenisher.replenish("forest_double")
+                    ExchangeReplenisher.replenish("forest_shield")
+                    ExchangeReplenisher.replenish("forest_accelerate")
+                    tc.countDebug("道具自动补充")
                 }
 
                 if (energyRain!!.value) {

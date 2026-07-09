@@ -22,10 +22,25 @@ object SliderBypassHelper {
     private const val TAG = "SliderBypass"
     private var classLoader: ClassLoader? = null
     private var hookInstalled = false
+    @Volatile
+    private var sliderBypassEnabled = false
+    @Volatile
+    private var captchaUIHookEnabled = false
 
     fun init(loader: ClassLoader) {
         classLoader = loader
         Log.record(TAG, "滑块绕过助手初始化完成")
+    }
+
+    /**
+     * 设置功能开关
+     * @param sliderEnabled 是否启用滑块弹窗自动关闭
+     * @param captchaEnabled 是否启用安全弹窗拦截（VPN/访问拒绝等）
+     */
+    fun setConfig(sliderEnabled: Boolean, captchaEnabled: Boolean) {
+        sliderBypassEnabled = sliderEnabled
+        captchaUIHookEnabled = captchaEnabled
+        Log.record(TAG, "配置更新: sliderBypass=$sliderEnabled, captchaHook=$captchaEnabled")
     }
 
     /**
@@ -103,16 +118,16 @@ object SliderBypassHelper {
                                 url.contains("errorpage") || url.contains("vpnDetect") ||
                                 url.contains("proxyCheck") || url.contains("accessRefuse")
 
-                            if (isSliderPage) {
+                            if (isSliderPage && sliderBypassEnabled) {
                                 Log.record(TAG, "检测到滑块验证页面，启动自动滑动: $className")
                                 scheduleAutoSlide(activity, 800)
-                            } else if (isOtherVerify) {
+                            } else if (isOtherVerify && captchaUIHookEnabled) {
                                 Log.record(TAG, "拦截非滑块验证页面: $className url=$url")
                                 activity.finish()
-                            } else if (isAccessDenied) {
+                            } else if (isAccessDenied && captchaUIHookEnabled) {
                                 Log.record(TAG, "拦截访问被拒绝/VPN检测页面: $className url=$url")
                                 activity.finish()
-                            } else {
+                            } else if (sliderBypassEnabled) {
                                 checkEmbeddedContainer(activity)
                             }
                         } catch (_: Throwable) {}
@@ -397,6 +412,10 @@ object SliderBypassHelper {
      * 拦截安全联署请求，返回有效的安全头部
      */
     private fun hookRpcSecurityCountersign(loader: ClassLoader) {
+        if (!captchaUIHookEnabled) {
+            Log.record(TAG, "RPC 安全联署绕过未启用，跳过安装")
+            return
+        }
         try {
             val proxyClass = XposedHelpers.findClass(
                 "com.alibaba.ariver.commonability.network.rpc.RpcSecurityCountersignHandleProxy",
@@ -454,9 +473,7 @@ object SliderBypassHelper {
      */
     private fun hookSecurityVerification(loader: ClassLoader) {
         try {
-            // 使用 H5BasePage 具体实现类（H5Page 是接口，不能直接 Hook）
             var hooked = false
-            // 尝试 H5BasePage
             try {
                 XposedHelpers.findAndHookMethod(
                     "com.alipay.mobile.nebula.basebridge.H5BasePage",
@@ -466,12 +483,12 @@ object SliderBypassHelper {
                     object : XC_MethodHook() {
                         override fun beforeHookedMethod(param: MethodHookParam) {
                             val url = param.args[0] as? String ?: return
-                            if (url.contains("securityVerify") ||
+                            val isSliderUrl = url.contains("securityVerify") ||
                                 url.contains("slidingVerify") ||
                                 url.contains("captcha") ||
                                 url.contains("riskVerify") ||
-                                url.contains("ariver/verify") ||
-                                url.contains("accessDeny") ||
+                                url.contains("ariver/verify")
+                            val isBlockUrl = url.contains("accessDeny") ||
                                 url.contains("denied") ||
                                 url.contains("forbidden") ||
                                 url.contains("requestfailure") ||
@@ -481,7 +498,8 @@ object SliderBypassHelper {
                                 url.contains("vpnDetect") ||
                                 url.contains("proxyCheck") ||
                                 url.contains("accessRefuse")
-                            ) {
+
+                            if ((isSliderUrl && sliderBypassEnabled) || (isBlockUrl && captchaUIHookEnabled)) {
                                 Log.record(TAG, "H5BasePage 拦截安全验证/拒绝访问页面: $url")
                                 param.result = null
                             }
@@ -491,7 +509,6 @@ object SliderBypassHelper {
                 Log.record(TAG, "Hook H5BasePage.loadUrl 成功")
             } catch (_: Throwable) {}
 
-            // 备用：尝试 H5WebView 的 loadUrl
             if (!hooked) {
                 try {
                     XposedHelpers.findAndHookMethod(
@@ -502,12 +519,12 @@ object SliderBypassHelper {
                         object : XC_MethodHook() {
                             override fun beforeHookedMethod(param: MethodHookParam) {
                                 val url = param.args[0] as? String ?: return
-                                if (url.contains("securityVerify") ||
+                                val isSliderUrl = url.contains("securityVerify") ||
                                     url.contains("slidingVerify") ||
                                     url.contains("captcha") ||
                                     url.contains("riskVerify") ||
-                                    url.contains("ariver/verify") ||
-                                    url.contains("accessDeny") ||
+                                    url.contains("ariver/verify")
+                                val isBlockUrl = url.contains("accessDeny") ||
                                     url.contains("denied") ||
                                     url.contains("forbidden") ||
                                     url.contains("requestfailure") ||
@@ -517,7 +534,8 @@ object SliderBypassHelper {
                                     url.contains("vpnDetect") ||
                                     url.contains("proxyCheck") ||
                                     url.contains("accessRefuse")
-                                ) {
+
+                                if ((isSliderUrl && sliderBypassEnabled) || (isBlockUrl && captchaUIHookEnabled)) {
                                     Log.record(TAG, "H5WebView 拦截安全验证/拒绝访问页面: $url")
                                     param.result = null
                                 }
@@ -542,7 +560,6 @@ object SliderBypassHelper {
      */
     private fun hookAntCaptcha(loader: ClassLoader) {
         try {
-            // Hook 新版 RPC 通道: RpcBridgeExtension.rpc()
             val bridgeClass = XposedHelpers.findClass(
                 "com.alibaba.ariver.commonability.network.rpc.RpcBridgeExtension", loader
             )
@@ -559,20 +576,20 @@ object SliderBypassHelper {
                 XposedHelpers.findClass("com.alibaba.ariver.engine.api.bridge.extension.BridgeCallback", loader),
                 object : XC_MethodHook() {
                     override fun beforeHookedMethod(param: MethodHookParam) {
+                        if (!sliderBypassEnabled) return
                         val method = param.args[0] as? String ?: return
                         if (!method.contains("antcaptcha")) return
                         Log.record(TAG, "拦截 antcaptcha: $method")
                         try {
                             val cb = param.args[15]
                             if (cb != null) {
-                                // 直接调用 sendJSONResponse 返回假成功
                                 val fakeJson = jsonClass.newInstance()
                                 jsonClass.getMethod("put", String::class.java, Object::class.java)
                                     .invoke(fakeJson, "success", true)
                                 jsonClass.getMethod("put", String::class.java, Object::class.java)
                                     .invoke(fakeJson, "data", "{}")
                                 XposedHelpers.callMethod(cb, "sendJSONResponse", fakeJson)
-                                param.result = null // 阻止原始调用
+                                param.result = null
                             }
                         } catch (_: Throwable) {}
                     }

@@ -50,6 +50,7 @@ import fansirsqi.xposed.sesame.model.BaseModel.Companion.checkInterval
 import fansirsqi.xposed.sesame.model.BaseModel.Companion.debugMode
 import fansirsqi.xposed.sesame.model.BaseModel.Companion.destroyData
 import fansirsqi.xposed.sesame.model.BaseModel.Companion.enableCaptchaUIHook
+import fansirsqi.xposed.sesame.model.BaseModel.Companion.enableSliderBypass
 import fansirsqi.xposed.sesame.model.BaseModel.Companion.execAtTimeList
 import fansirsqi.xposed.sesame.model.BaseModel.Companion.newRpc
 import fansirsqi.xposed.sesame.model.BaseModel.Companion.sendHookData
@@ -238,7 +239,8 @@ class ApplicationHook {
                         AuthCodeHelper.getAuthCode("2021005114632037" )
                         // 初始化滑块绕过（由用户控制开关）
                         SliderBypassHelper.init(classLoader!!)
-                        if (enableCaptchaUIHook.value) {
+                        SliderBypassHelper.setConfig(enableSliderBypass.value, enableCaptchaUIHook.value)
+                        if (enableCaptchaUIHook.value || enableSliderBypass.value) {
                             SliderBypassHelper.installAllHooks()
                         }
                         // 初始化 RPC 抓包
