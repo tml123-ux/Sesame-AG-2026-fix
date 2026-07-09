@@ -1056,6 +1056,8 @@ class AntForest : ModelTask(), EnergyCollectCallback {
         taskCount.set(0) // 重置任务计数
         // 每日重置时清空频率限制记录，让所有好友都有新的机会
         ForestUtil.clearAllFrequencyLimits()
+        // 每日重置双击卡道具使用次数，防止计数器累计导致永远无法自动使用
+        Status.INSTANCE.doubleTimes = 0
         Log.record(TAG, "任务计数器已重置")
     }
 
@@ -3330,8 +3332,12 @@ class AntForest : ModelTask(), EnergyCollectCallback {
             if (needDouble || needStealth || needShield || needEnergyBombCard || needrobExpand || needBubbleBoostCard) {
                 synchronized(doubleCardLockObj) {
                     val bagObject = queryPropList()
+                    if (bagObject == null) {
+                        Log.record(TAG, "查询背包失败，无法使用道具，将跳过本次道具使用")
+                        return
+                    }
                     // Log.runtime(TAG, "bagObject=" + (bagObject == null ? "null" : bagObject.toString()));
-                    if (needDouble) useDoubleCard(bagObject!!) // 使用双击卡
+                    if (needDouble) useDoubleCard(bagObject) // 使用双击卡
 
                     if (needrobExpand) userobExpandCard() // 使用1.1倍能量卡
 
