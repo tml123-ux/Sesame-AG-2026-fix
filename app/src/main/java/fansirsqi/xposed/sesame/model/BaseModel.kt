@@ -194,7 +194,7 @@ class BaseModel : Model() {
          */
         @Getter
         @JvmStatic
-        val enableAutoSlideCaptcha: BooleanModelField = BooleanModelField("enableAutoSlideCaptcha", "自动滑动滑块验证 | 开启后自动识别并滑动关闭滑块", false)
+        val enableAutoSlideCaptcha: BooleanModelField = BooleanModelField("enableAutoSlideCaptcha", "自动滑动滑块 | 多策略:视图查找+WebView+坐标推算+3轮重试", false)
 
 
         /**

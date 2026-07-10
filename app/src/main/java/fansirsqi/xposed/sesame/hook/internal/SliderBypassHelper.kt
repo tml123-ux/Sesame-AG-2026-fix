@@ -4,6 +4,8 @@ import android.os.SystemClock
 import android.view.MotionEvent
 import android.view.View
 import android.view.ViewGroup
+import android.webkit.WebView
+import android.widget.TextView
 import de.robv.android.xposed.XC_MethodHook
 import de.robv.android.xposed.XC_MethodReplacement
 import de.robv.android.xposed.XposedHelpers
@@ -76,7 +78,7 @@ object SliderBypassHelper {
     }
 
     /**
-     * Hook NebulaTransActivity - 滑块页面自动滑动验证，其他验证页面自动关闭
+     * Hook NebulaTransActivity + 通用Activity - 滑块页面自动滑动验证
      */
     private fun hookNebulaTransActivity(loader: ClassLoader) {
         try {
@@ -89,43 +91,108 @@ object SliderBypassHelper {
                         try {
                             val activity = param.thisObject as? android.app.Activity ?: return
                             val className = activity.javaClass.name
-                            if (!className.contains("NebulaTransActivity")) return
+                            val isNebulaActivity = className.contains("NebulaTransActivity")
+                            val isSchemeActivity = className.contains("SchemeStartActivity")
+                            val isWebViewActivity = className.contains("WebViewActivity") || 
+                                className.contains("H5Activity") || className.contains("BrowserActivity")
 
                             val intent = activity.intent
                             val url = intent?.dataString ?: intent?.getStringExtra("url") ?: ""
 
                             val isSliderPage = url.contains("slider") || url.contains("captcha") ||
-                                url.contains("slideVerify") || url.contains("dragVerify")
+                                url.contains("slideVerify") || url.contains("dragVerify") ||
+                                url.contains("antcaptcha") || url.contains("slidingVerify") ||
+                                url.contains("nc_verify") || url.contains("alipayVerify")
+
                             val isOtherVerify = url.contains("security") || url.contains("verify") ||
                                 url.contains("risk") || url.contains("safePay")
+
                             val isAccessDenied = url.contains("accessDeny") || url.contains("denied") ||
                                 url.contains("forbidden") || url.contains("requestfailure") ||
                                 url.contains("noPermission") || url.contains("networkBlock") ||
                                 url.contains("errorpage") || url.contains("vpnDetect") ||
                                 url.contains("proxyCheck") || url.contains("accessRefuse")
 
-                            if (isSliderPage) {
-                                if (BaseModel.enableAutoSlideCaptcha.value) {
-                                    Log.record(TAG, "检测到滑块验证页面，启动自动滑动: $className")
+                            // NebulaTransActivity 中的滑块检测
+                            if (isNebulaActivity) {
+                                if (isSliderPage && BaseModel.enableAutoSlideCaptcha.value) {
+                                    Log.record(TAG, "NebulaTransActivity检测到滑块: $className")
                                     scheduleAutoSlide(activity, 800)
+                                } else if (isSliderPage) {
+                                    Log.record(TAG, "检测到滑块验证页面，自动滑动已关闭: $className")
+                                } else if (isOtherVerify) {
+                                    Log.record(TAG, "拦截非滑块验证页面: $className url=$url")
+                                    activity.finish()
+                                } else if (isAccessDenied) {
+                                    Log.record(TAG, "拦截访问被拒绝/VPN检测页面: $className url=$url")
+                                    activity.finish()
                                 } else {
-                                    Log.record(TAG, "检测到滑块验证页面，自动滑动已关闭，保持页面等待手动操作")
+                                    // 兜底：检测页面标题/内容中的滑块关键词
+                                    if (BaseModel.enableAutoSlideCaptcha.value) {
+                                        checkActivityForSliderContent(activity, className)
+                                    }
                                 }
-                            } else if (isOtherVerify) {
-                                Log.record(TAG, "拦截非滑块验证页面: $className url=$url")
-                                activity.finish()
-                            } else if (isAccessDenied) {
-                                Log.record(TAG, "拦截访问被拒绝/VPN检测页面: $className url=$url")
-                                activity.finish()
-                            } else {
+                                return
+                            }
+
+                            // 通用Activity滑块检测（非Nebula）
+                            if (BaseModel.enableAutoSlideCaptcha.value) {
+                                if (isSliderPage) {
+                                    Log.record(TAG, "通用Activity检测到滑块页面: $className url=$url")
+                                    scheduleAutoSlide(activity, 1500)
+                                } else if (className.contains("Verify") || className.contains("Captcha")) {
+                                    Log.record(TAG, "验证相关Activity: $className")
+                                    scheduleAutoSlide(activity, 1200)
+                                }
+                                // 每次Activity打开都检测嵌入容器
                                 checkEmbeddedContainer(activity)
                             }
                         } catch (_: Throwable) {}
                     }
                 })
-            Log.record(TAG, "Hook NebulaTransActivity (auto-slide) 成功")
+            Log.record(TAG, "Hook Activity.onResume (滑块检测) 成功")
         } catch (e: Throwable) {
-            Log.record(TAG, "Hook NebulaTransActivity 失败: ${e.message}")
+            Log.record(TAG, "Hook Activity.onResume 失败: ${e.message}")
+        }
+    }
+
+    /** 检测 Activity 内容中的滑块关键词 */
+    private fun checkActivityForSliderContent(activity: android.app.Activity, className: String) {
+        try {
+            val decorView = activity.window?.decorView ?: return
+            // 扫描视图树中的文本内容
+            val texts = mutableListOf<String>()
+            collectViewTexts(decorView, texts)
+            val content = texts.joinToString(" ").lowercase()
+            if (content.contains("滑块") || content.contains("滑动") ||
+                content.contains("slider") || content.contains("slide") ||
+                content.contains("drag") || content.contains("captcha") ||
+                content.contains("人机验证") || content.contains("安全验证")) {
+                Log.record(TAG, "Activity内容检测到滑块关键词: $className")
+                scheduleAutoSlide(activity, 1000)
+            }
+        } catch (_: Throwable) {}
+    }
+
+    private fun collectViewTexts(view: View, result: MutableList<String>) {
+        try {
+            val contentDesc = view.contentDescription?.toString()
+            if (!contentDesc.isNullOrBlank() && contentDesc.length < 100) {
+                result.add(contentDesc)
+            }
+            if (view is android.widget.TextView) {
+                val text = view.text?.toString()
+                if (!text.isNullOrBlank() && text.length < 100) {
+                    result.add(text)
+                }
+            }
+        } catch (_: Throwable) {}
+        if (result.size >= 50) return
+        if (view is ViewGroup) {
+            for (i in 0 until Math.min(view.childCount, 30)) {
+                val child = view.getChildAt(i) ?: continue
+                collectViewTexts(child, result)
+            }
         }
     }
 
@@ -148,52 +215,81 @@ object SliderBypassHelper {
     }
 
     /**
-     * 调度自动滑动任务
+     * 调度自动滑动任务（带多轮重试）
      * @param delayMs 延迟毫秒数，等待页面渲染完成
      */
     private fun scheduleAutoSlide(activity: android.app.Activity, delayMs: Long) {
         slideExecutor.schedule({
-            try {
-                val result = performAutoSlideGesture(activity)
-                if (!result) {
-                    Log.record(TAG, "自动滑动未找到滑块视图，保持页面等待手动操作")
-                }
-            } catch (e: Throwable) {
-                Log.record(TAG, "自动滑动异常: ${e.message}，保持页面等待手动操作")
-            }
+            tryAutoSlideWithRetry(activity, 3)
         }, delayMs, TimeUnit.MILLISECONDS)
     }
 
     /**
-     * 执行自动滑动验证手势
-     * @return true if slide was performed, false if no slider found
+     * 多轮重试自动滑动：视图查找 -> 坐标估算 -> WebView检测
+     */
+    private fun tryAutoSlideWithRetry(activity: android.app.Activity, maxAttempts: Int) {
+        for (attempt in 1..maxAttempts) {
+            try {
+                Log.record(TAG, "自动滑动尝试 $attempt/$maxAttempts")
+                val result = performAutoSlideGesture(activity)
+                if (result) {
+                    Log.record(TAG, "自动滑动成功 (第${attempt}次)")
+                    return
+                }
+                if (attempt < maxAttempts) {
+                    Log.record(TAG, "自动滑动失败，等待 ${attempt * 1200}ms 后重试")
+                    Thread.sleep((attempt * 1200).toLong())
+                }
+            } catch (e: Throwable) {
+                Log.record(TAG, "自动滑动异常(第${attempt}次): ${e.message}")
+                if (attempt < maxAttempts) {
+                    Thread.sleep((attempt * 1200).toLong())
+                }
+            }
+        }
+        Log.record(TAG, "自动滑动全部尝试失败，保持页面等待手动操作")
+    }
+
+    /**
+     * 执行自动滑动验证手势 - 多策略尝试
+     * 策略1: 视图层级查找滑块控件
+     * 策略2: WebView JavaScript 检测并操作
+     * 策略3: 坐标推算回退
+     * @return true if slide was performed, false if all strategies failed
      */
     private fun performAutoSlideGesture(activity: android.app.Activity): Boolean {
         val decorView = activity.window?.decorView ?: return false
+
+        // 策略1: 视图层级查找
         val sliderView = findSliderThumbView(decorView)
-        if (sliderView == null) {
-            Log.record(TAG, "未找到滑块拖拽控件")
-            return false
+        if (sliderView != null) {
+            val containerView = findSliderContainer(decorView, sliderView)
+            val slideDistance = if (containerView != null) {
+                computeSlideDistance(containerView, sliderView)
+            } else {
+                decorView.width * 0.62f
+            }
+            if (slideDistance > 0) {
+                Log.record(TAG, "策略1-视图查找: 找到滑块, distance=$slideDistance")
+                executeTouchGesture(sliderView, slideDistance)
+                return true
+            }
         }
 
-        val containerView = findSliderContainer(decorView, sliderView)
-        val slideDistance: Float
-
-        if (containerView != null) {
-            slideDistance = computeSlideDistance(containerView, sliderView)
-        } else {
-            slideDistance = decorView.width * 0.62f
+        // 策略2: 尝试 WebView 内部滑块
+        if (tryWebViewSliderGesture(decorView)) {
+            return true
         }
 
-        if (slideDistance <= 0) {
-            Log.record(TAG, "滑动距离计算异常: $slideDistance")
-            return false
+        // 策略3: 坐标推算回退 - 尝试多个可能位置
+        Log.record(TAG, "策略1/2失败，使用坐标推算回退")
+        for (yRatio in listOf(0.68f, 0.72f, 0.65f, 0.75f, 0.70f)) {
+            val result = performCoordinateSlide(decorView, yRatio)
+            if (result) return true
+            Thread.sleep(40)
         }
 
-        Log.record(TAG, "开始自动滑动: distance=$slideDistance px, slider=${sliderView.javaClass.name}")
-        executeTouchGesture(sliderView, slideDistance)
-        Log.record(TAG, "自动滑动完成")
-        return true
+        return false
     }
 
     /**
@@ -322,6 +418,179 @@ object SliderBypassHelper {
     }
 
     /**
+     * 策略2: 尝试在 WebView 中查找滑块并执行滑动
+     */
+    private fun tryWebViewSliderGesture(root: View): Boolean {
+        try {
+            val webViews = mutableListOf<View>()
+            collectWebViews(root, webViews)
+            if (webViews.isEmpty()) return false
+
+            for (webView in webViews) {
+                if (webView !is ViewGroup) continue
+                val thumbView = findSliderInWebViewContainer(webView)
+                if (thumbView != null) {
+                    Log.record(TAG, "策略2-WebView: 在WebView容器中找到滑块控件")
+                    val slideDistance = root.width * 0.62f
+                    executeTouchGesture(thumbView, slideDistance)
+                    return true
+                }
+            }
+
+            // WebView 存在但无可见滑块，尝试 WebView 坐标滑动
+            if (webViews.isNotEmpty()) {
+                val wv = webViews.first()
+                Log.record(TAG, "策略2-WebView: 尝试WebView坐标滑动")
+                return performCoordinateSlide(wv, 0.68f)
+            }
+        } catch (e: Throwable) {
+            Log.record(TAG, "WebView滑块检测异常: ${e.message}")
+        }
+        return false
+    }
+
+    /**
+     * 收集视图树中所有 WebView
+     */
+    private fun collectWebViews(view: View, result: MutableList<View>) {
+        if (view.javaClass.name.contains("WebView") || view.javaClass.name.contains("NebulaWebView")) {
+            result.add(view)
+        }
+        if (view is ViewGroup) {
+            for (i in 0 until view.childCount) {
+                val child = view.getChildAt(i) ?: continue
+                collectWebViews(child, result)
+            }
+        }
+    }
+
+    /**
+     * 在 WebView 容器内部递归查找滑块控件
+     */
+    private fun findSliderInWebViewContainer(container: ViewGroup): View? {
+        val sliderClassKeywords = arrayOf("Slider", "Slide", "Drag", "Thumb", "Captcha", "Verify", "Seek")
+        val sliderIdKeywords = arrayOf("slider", "slide", "thumb", "drag", "captcha", "verify", "seek", "btn")
+
+        val candidates = mutableListOf<View>()
+        collectSliderCandidates(container, sliderClassKeywords, sliderIdKeywords, candidates)
+        if (candidates.isNotEmpty()) {
+            return candidates.firstOrNull { v ->
+                val loc = IntArray(2)
+                v.getLocationOnScreen(loc)
+                v.width in 40..200 && v.height in 40..200
+            }
+        }
+
+        // 回退：找 WebView 中任意位置在屏幕中下部区域的可点击视图
+        val allViews = mutableListOf<View>()
+        collectSliderCandidatesInWebView(container, allViews)
+        return allViews.firstOrNull { v ->
+            val loc = IntArray(2)
+            v.getLocationOnScreen(loc)
+            v.width in 40..200 && v.height in 40..200 &&
+                loc[1] > container.height * 0.5f && loc[1] < container.height * 0.85f
+        }
+    }
+
+    private fun collectSliderCandidatesInWebView(view: View, result: MutableList<View>) {
+        if (view.isClickable && view.width in 40..200 && view.height in 40..200) {
+            result.add(view)
+        }
+        if (result.size >= 30) return
+        if (view is ViewGroup) {
+            for (i in 0 until view.childCount) {
+                val child = view.getChildAt(i) ?: continue
+                collectSliderCandidatesInWebView(child, result)
+            }
+        }
+    }
+
+    /**
+     * 策略3: 坐标推算回退滑动
+     * 在指定 Y 位置执行水平滑动手势
+     */
+    private fun performCoordinateSlide(view: View, yRatio: Float): Boolean {
+        try {
+            val screenWidth = view.width.toFloat()
+            val screenHeight = view.height.toFloat()
+            if (screenWidth <= 0 || screenHeight <= 0) return false
+
+            val startX = screenWidth * 0.12f
+            val endX = screenWidth * 0.88f
+            val y = screenHeight * yRatio
+            val slideDistance = endX - startX
+
+            if (slideDistance <= 0) return false
+
+            Log.record(TAG, "坐标滑动: startX=$startX endX=$endX y=$y yRatio=$yRatio")
+            executeCoordinateTouchGesture(view, startX, y, slideDistance)
+            return true
+        } catch (e: Throwable) {
+            Log.record(TAG, "坐标滑动异常: ${e.message}")
+        }
+        return false
+    }
+
+    /**
+     * 基于绝对坐标执行触摸滑动手势（用于无视图引用的场景）
+     */
+    private fun executeCoordinateTouchGesture(view: View, startX: Float, startY: Float, totalDistance: Float) {
+        val downTime = SystemClock.uptimeMillis()
+        val endX = startX + totalDistance
+
+        val downEvent = MotionEvent.obtain(
+            downTime, downTime, MotionEvent.ACTION_DOWN, startX, startY, 0
+        )
+        view.dispatchTouchEvent(downEvent)
+        downEvent.recycle()
+
+        val totalSteps = 18 + (5..10).random()
+        val baseStepMs = 6L + (0..4).random()
+        var currentX = startX
+        var eventTime = downTime + 50
+
+        for (i in 1..totalSteps) {
+            val progress = i.toFloat() / totalSteps
+            val easeProgress = easeProgress(progress)
+            currentX = startX + totalDistance * easeProgress
+            val jitter = ((Math.random() - 0.5) * 4).toFloat()
+
+            val stepDuration = when {
+                progress < 0.15f -> baseStepMs + (5..12).random()
+                progress < 0.85f -> baseStepMs + (2..6).random()
+                else -> baseStepMs + (10..20).random()
+            }
+            eventTime += stepDuration
+
+            val moveEvent = MotionEvent.obtain(
+                downTime, eventTime,
+                MotionEvent.ACTION_MOVE, currentX, startY + jitter, 0
+            )
+            view.dispatchTouchEvent(moveEvent)
+            moveEvent.recycle()
+
+            try { Thread.sleep(stepDuration) } catch (_: Throwable) {}
+        }
+
+        val overShoot = 3f + (0..5).random()
+        eventTime += 40
+        val lastMoveEvent = MotionEvent.obtain(
+            downTime, eventTime,
+            MotionEvent.ACTION_MOVE, endX + overShoot, startY, 0
+        )
+        view.dispatchTouchEvent(lastMoveEvent)
+        lastMoveEvent.recycle()
+
+        eventTime += 20 + (0..30).random()
+        val upEvent = MotionEvent.obtain(
+            downTime, eventTime,
+            MotionEvent.ACTION_UP, endX + overShoot, startY, 0
+        )
+        view.dispatchTouchEvent(upEvent)
+        upEvent.recycle()
+    }
+
+    /**
      * 执行模拟触摸手势滑动
      * 模拟人类滑动特征: 加速启动 -> 匀速 -> 微调 → 释放
      */
@@ -369,7 +638,7 @@ object SliderBypassHelper {
             view.dispatchTouchEvent(moveEvent)
             moveEvent.recycle()
 
-            Thread.sleep(stepDuration)
+            try { Thread.sleep(stepDuration) } catch (_: Throwable) {}
         }
 
         val overShoot = 3f + (0..5).random()
