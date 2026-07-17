@@ -93,18 +93,27 @@ class WorkPoint : ModelTask() {
                 for (j in 0 until cycleList.length()) {
                     val cycleInfo = cycleList.optJSONObject(j) ?: continue
 
-                    val todayStatus = cycleInfo.optString("todaySignInStatus", "UNSIGNED")
                     val accumulateCount = cycleInfo.optInt("accumulativeSignInCount", 0)
                     val continuousCount = cycleInfo.optInt("continuousSignInCount", 0)
+                    val latestSignInDate = cycleInfo.optString("latestSignInDate", "")
+                    val todayDate = cycleInfo.optString("todayDate", "")
 
-                    if ("SIGNED" == todayStatus) {
+                    if (todayDate.isNotEmpty() && latestSignInDate == todayDate) {
                         Log.record(TAG, "工分签到: 今日已签到, 连续${continuousCount}天, 累计${accumulateCount}天")
                         continue
+                    }
+                    if (todayDate.isEmpty() && latestSignInDate.isNotEmpty()) {
+                        // 兜底: 用latestSignInDate与当天日期比较
+                        val now = java.text.SimpleDateFormat("yyyyMMdd", java.util.Locale.getDefault())
+                            .format(java.util.Date())
+                        if (latestSignInDate == now) {
+                            Log.record(TAG, "工分签到: 今日已签到, 连续${continuousCount}天, 累计${accumulateCount}天")
+                            continue
+                        }
                     }
 
                     // 未签到, 尝试签到
                     val signInCode = orderInfo.optString("code", "")
-                    val todayDate = cycleInfo.optString("todayDate", "")
                     val todayDayOfWeek = cycleInfo.optString("todayDayOfWeek", "")
 
                     // 获取今日奖励
@@ -133,7 +142,7 @@ class WorkPoint : ModelTask() {
 
     private fun trySignIn(signInCode: String): Boolean {
         try {
-            val resp = JSONObject(WorkPointRpcCall.applyTask(signInCode))
+            val resp = JSONObject(WorkPointRpcCall.signInSubmit(signInCode))
             return ResChecker.checkRes(TAG + "工分签到提交:", resp)
         } catch (t: Throwable) {
             Log.printStackTrace(TAG, t)
@@ -172,70 +181,70 @@ class WorkPoint : ModelTask() {
                     val subTitle = displayInfo?.optString("activitySubTitle", "") ?: ""
                     val desc = "$title${if (subTitle.isNotEmpty()) "($subTitle)" else ""}"
 
-                    // 检查是否已领取
-                    val claimedTask = task.optJSONObject("claimedTask")
-                    val processedTask = task.optJSONObject("processedTask")
+                    val taskStatus = task.optString("taskStatus", "")
+                    val rewardStatus = task.optString("rewardStatus", "")
 
-                    if (processedTask != null) {
-                        Log.record(TAG, "工分任务[已完成] $desc")
+                    if ("finish" == taskStatus && "success" == rewardStatus) {
+                        val rewardInfo = task.optJSONObject("rewardInfo")
+                        val value = rewardInfo?.optJSONArray("rightList")
+                            ?.optJSONObject(0)
+                            ?.optJSONObject("displayInfo")
+                            ?.optString("value", "?") ?: "?"
+                        Log.record(TAG, "工分任务[已完成] $desc (+${value}工分)")
                         continue
                     }
 
-                    // 未领取 → 领取任务
-                    if (claimedTask == null) {
-                        Log.record(TAG, "工分任务[领取] $desc")
-                        val applyResult = JSONObject(WorkPointRpcCall.applyTask(code))
+                    val canPropel = task.optBoolean("canPropelNow", false)
+                    val recordNo = task.optString("recordNo", "")
 
-                        if (ResChecker.checkRes(TAG + "领取工分任务失败:", applyResult)) {
-                            val applyContent = extractComponentContent(applyResult, "independent_component_task_reward_01961455")
-                            val cTask = applyContent?.optJSONObject("claimedTask")
-                            val recordNo = cTask?.optString("recordNo", "") ?: ""
-                            val outBizNo = cTask?.optLong("outBizNo", 0) ?: 0
-
-                            if (recordNo.isNotEmpty() && outBizNo > 0) {
-                                sleepCompat((1000L..2000L).random())
-
-                                // 完成(提交)任务
-                                val processResult = JSONObject(
-                                    WorkPointRpcCall.processTask(code, outBizNo, recordNo)
-                                )
-                                if (ResChecker.checkRes(TAG + "完成工分任务失败:", processResult)) {
-                                    Log.other("工分任务[$desc]#完成")
-                                    hasChange = true
-                                } else {
-                                    Log.record(TAG, "工分任务完成失败: $desc")
-                                }
-                            } else {
-                                Log.record(TAG, "工分任务领取无返回 recordNo: $desc")
-                            }
-                        } else {
-                            Log.record(TAG, "工分任务领取失败: $desc")
+                    // 已领取(来自其他会话)但未完成 → 直接process
+                    if (recordNo.isNotEmpty() && canPropel) {
+                        Log.record(TAG, "工分任务[已领取] $desc -> 完成")
+                        sleepCompat((1000L..2000L).random())
+                        val outBizNo = System.currentTimeMillis()
+                        val processResult = JSONObject(
+                            WorkPointRpcCall.processTask(code, outBizNo, recordNo)
+                        )
+                        if (ResChecker.checkRes(TAG + "完成工分任务失败:", processResult)) {
+                            Log.other("工分任务[$desc]#完成")
+                            hasChange = true
                         }
                         sleepCompat((1000L..2000L).random())
                         continue
                     }
 
-                    // 已领取但未完成
-                    val recordNo = claimedTask.optString("recordNo", "")
-                    if (recordNo.isEmpty()) {
-                        Log.record(TAG, "工分任务[已领取但无recordNo] $desc")
+                    // 未领取 → 领取任务
+                    if (canPropel || "init" == taskStatus) {
+                        Log.record(TAG, "工分任务[领取] $desc")
+                        val applyResult = JSONObject(WorkPointRpcCall.applyTask(code))
+
+                        if (ResChecker.checkRes(TAG + "领取工分任务失败:", applyResult)) {
+                            val applyContent = extractComponentContent(
+                                applyResult, "independent_component_task_reward_01961455"
+                            )
+                            val cTask = applyContent?.optJSONObject("claimedTask")
+                            val newRecordNo = cTask?.optString("recordNo", "") ?: ""
+
+                            if (newRecordNo.isNotEmpty()) {
+                                sleepCompat((1000L..2000L).random())
+
+                                // 完成(提交)任务
+                                val outBizNo = cTask?.optLong("outBizNo", System.currentTimeMillis())
+                                    ?: System.currentTimeMillis()
+                                val processResult = JSONObject(
+                                    WorkPointRpcCall.processTask(code, outBizNo, newRecordNo)
+                                )
+                                if (ResChecker.checkRes(TAG + "完成工分任务失败:", processResult)) {
+                                    Log.other("工分任务[$desc]#完成")
+                                    hasChange = true
+                                }
+                            } else {
+                                Log.record(TAG, "工分任务领取无返回 recordNo: $desc")
+                            }
+                        }
+                        sleepCompat((1000L..2000L).random())
                         continue
                     }
-
-                    val outBizNo = claimedTask.optLong("outBizNo",
-                        claimedTask.optJSONObject("detailInfo")?.optLong("outBizNo", 0)
-                            ?: System.currentTimeMillis())
-
-                    val processResult = JSONObject(
-                        WorkPointRpcCall.processTask(code, outBizNo, recordNo)
-                    )
-                    if (ResChecker.checkRes(TAG + "完成工分任务失败:", processResult)) {
-                        Log.other("工分任务[$desc]#完成")
-                        hasChange = true
-                    } else {
-                        Log.record(TAG, "工分任务完成失败: $desc")
-                    }
-                    sleepCompat((1000L..2000L).random())
                 }
 
                 if (!hasChange) break

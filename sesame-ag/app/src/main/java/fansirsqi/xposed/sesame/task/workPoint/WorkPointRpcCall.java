@@ -21,6 +21,7 @@ public class WorkPointRpcCall {
     // 签到组件
     private static final String SIGN_IN_COMPONENT = "independent_component_sign_in_01961456";
     private static final String COMP_SIGN_IN_RECALL = SIGN_IN_COMPONENT + "_independent_component_sign_in_recall";
+    private static final String COMP_SIGN_IN_SIGN = SIGN_IN_COMPONENT + "_independent_component_sign_in_sign";
     private static final String COMP_SIGN_IN_QUERY = SIGN_IN_COMPONENT + "_independent_component_sign_in_query_history";
 
     // 任务组件
@@ -35,6 +36,16 @@ public class WorkPointRpcCall {
      */
     public static String signInRecall() throws JSONException {
         return buildProgramInvoke(COMP_SIGN_IN_RECALL, null);
+    }
+
+    /**
+     * 签到-执行签到 (sign)
+     * @param signInCode 签到计划码,如 "SIG2025010702647012"
+     */
+    public static String signInSubmit(String signInCode) throws JSONException {
+        JSONObject compParams = new JSONObject();
+        compParams.put("code", signInCode);
+        return buildProgramInvoke(COMP_SIGN_IN_SIGN, compParams);
     }
 
     /**
