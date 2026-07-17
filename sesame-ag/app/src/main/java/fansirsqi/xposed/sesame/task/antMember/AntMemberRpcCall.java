@@ -101,8 +101,19 @@ public class AntMemberRpcCall {
     }
 
     public static String queryAllStatusTaskList() {
-        return RequestManager.requestString("alipay.antmember.biz.rpc.membertask.h5.queryAllStatusTaskList",
-                "[{\"sourceBusiness\":\"signInAd\",\"sourcePassMap\":{\"innerSource\":\"\",\"source\":\"myTab\",\"unid\":\"\"}}]");
+        return RequestManager.requestString("com.alipay.amic.memtask.h5.MemTaskListQueryFacade.queryAllStatusTaskList",
+                "[{\"source\":\"signInAd\"}]");
+    }
+
+    public static String batchApplyTask(String[] taskConfigIdList) {
+        StringBuilder ids = new StringBuilder();
+        for (int i = 0; i < taskConfigIdList.length; i++) {
+            if (i > 0) ids.append("\",\"");
+            ids.append(taskConfigIdList[i]);
+        }
+        return RequestManager.requestString("com.alipay.amic.memtask.h5.MemTaskManagerFacade.batchApplyTask",
+                "[{\"pageMark\":\"adFeeds\",\"sourcePassMap\":{\"innerSource\":\"\",\"source\":\"mytab\",\"unid\":\"\"}" +
+                        ",\"taskConfigIdList\":[\"" + ids.toString() + "\"]}]");
     }
 
     /**

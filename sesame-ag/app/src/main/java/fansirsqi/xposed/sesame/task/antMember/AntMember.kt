@@ -1018,12 +1018,6 @@ class AntMember : ModelTask() {
         return false
     }
 
-    /**
-     * 会员签到
-     */
-    /**
-     * 会员签到
-     */
     private suspend fun doMemberSign(): Unit = CoroutineUtils.run {
         try {
             if (canMemberSignInToday(UserMap.currentUid)) {
@@ -1031,15 +1025,28 @@ class AntMember : ModelTask() {
                 delay(500)
                 val jo = JSONObject(s)
                 if (ResChecker.checkRes(TAG + "会员签到失败:", jo)) {
-                    Log.other(
-                        "会员签到📅[" + jo.getString("signinPoint") + "积分]#已签到" + jo.getString(
-                            "signinSumDay"
-                        ) + "天"
-                    )
+                    val alreadySigned = jo.optBoolean("currentSigninStatus", false)
+                    if (alreadySigned) {
+                        val records = jo.optJSONArray("flexibleSigninRecords")
+                        var sumDay = 0
+                        var todayPoint = 0
+                        if (records != null && records.length() > 0) {
+                            val todayRecord = records.optJSONObject(records.length() - 1)
+                            sumDay = todayRecord?.optInt("signinSumDay", 0) ?: 0
+                            todayPoint = todayRecord?.optInt("point", 0) ?: 0
+                        }
+                        Log.other("会员签到[${todayPoint}积分]#已签到${sumDay}天")
+                    } else {
+                        val autoSignSuccess = jo.optBoolean("autoSignInSuccess", false)
+                        if (autoSignSuccess) {
+                            Log.other("会员签到[签到成功]")
+                        } else {
+                            Log.record(TAG, "会员签到: 自动签到未成功, 可能需手动签到")
+                        }
+                    }
                     memberSignInToday(UserMap.currentUid)
                 } else {
-                    record(jo.getString("resultDesc"))
-                    record(s)
+                    Log.record(TAG, jo.optString("resultDesc", "查询签到失败"))
                 }
             }
             queryPointCert(1, 8)
@@ -1050,7 +1057,7 @@ class AntMember : ModelTask() {
 
     /**
      * 会员任务-逛一逛
-     * 单次执行 1
+     * 基于 taskProcessVOList 批量领取
      */
     private suspend fun doAllMemberAvailableTask(): Unit = CoroutineUtils.run {
         try {
@@ -1059,17 +1066,66 @@ class AntMember : ModelTask() {
             val jsonObject = JSONObject(str)
             if (!ResChecker.checkRes(TAG, jsonObject)) {
                 Log.error(
-                    "$TAG.doAllMemberAvailableTask", "会员任务响应失败: " + jsonObject.getString("resultDesc")
+                    "$TAG.doAllMemberAvailableTask", "会员任务响应失败: " + jsonObject.optString("resultDesc")
                 )
                 return@run
             }
-            if (!jsonObject.has("availableTaskList")) {
+            val resultData = jsonObject.optJSONObject("resultData")
+            if (resultData == null) {
+                Log.record(TAG, "会员任务无 resultData")
                 return@run
             }
-            val taskList = jsonObject.getJSONArray("availableTaskList")
+            val taskList = resultData.optJSONArray("taskProcessVOList")
+            if (taskList == null || taskList.length() == 0) {
+                Log.record(TAG, "当前无待完成会员任务")
+                return@run
+            }
+
+            val configIds = mutableListOf<String>()
+            val taskNames = mutableListOf<String>()
+            var totalPoint = 0
+
             for (j in 0 until taskList.length()) {
                 val task = taskList.getJSONObject(j)
-                processTask(task)
+                val cfg = task.optJSONObject("simpleTaskConfig") ?: continue
+                val configId = cfg.optString("configId", "")
+                val title = cfg.optString("title", "未知")
+                val stages = cfg.optJSONArray("stageVOList")
+                val point = stages?.optJSONObject(0)?.optJSONObject("awardParam")
+                    ?.optString("awardParamPoint", "0") ?: "0"
+
+                configIds.add(configId)
+                taskNames.add("$title(+$point)")
+                totalPoint += point.toIntOrNull() ?: 0
+            }
+
+            if (configIds.isEmpty()) {
+                Log.record(TAG, "会员任务无有效 configId")
+                return@run
+            }
+
+            Log.record(TAG, "会员任务[领取] ${taskNames.joinToString("、")} 共${totalPoint}积分")
+
+            val applyRes = AntMemberRpcCall.batchApplyTask(configIds.toTypedArray())
+            delay(1000)
+            val applyJo = JSONObject(applyRes)
+            if (!ResChecker.checkRes(TAG + "批量领取会员任务失败:", applyJo)) {
+                Log.error(TAG, "批量领取失败: " + applyJo.optString("resultDesc"))
+                return@run
+            }
+
+            val resultMap = applyJo.optJSONObject("resultData")?.optJSONObject("resultMap")
+            val successIds = mutableListOf<String>()
+            if (resultMap != null) {
+                for (id in configIds) {
+                    if ("SUCCESS" == resultMap.optString(id)) {
+                        successIds.add(id)
+                    }
+                }
+            }
+
+            if (successIds.isNotEmpty()) {
+                Log.other("会员任务${successIds.size}/${configIds.size}#${totalPoint}积分")
             }
         } catch (t: Throwable) {
             Log.printStackTrace(TAG, "doAllMemberAvailableTask err:", t)
