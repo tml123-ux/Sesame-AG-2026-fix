@@ -2880,7 +2880,18 @@ class AntMember : ModelTask() {
          * 商家积分任务
          */
         private suspend fun doMerchantMoreTask(): Unit = CoroutineUtils.run {
+            doMerchantMoreTask(0)
+        }
+
+        /**
+         * 商家积分任务（带递归深度限制）
+         */
+        private suspend fun doMerchantMoreTask(depth: Int): Unit = CoroutineUtils.run {
             val s = AntMemberRpcCall.taskListQuery()
+            if (depth >= 3) {
+                Log.record(TAG, "商家服务🏬积分任务递归深度已达上限($depth)，停止重试")
+                return@run
+            }
             try {
                 var doubleCheck = false
                 var jo = JSONObject(s)
@@ -2907,45 +2918,60 @@ class AntMember : ModelTask() {
                                 jo = JSONObject(AntMemberRpcCall.taskFinish(bizExtMap.getString("bizId")))
                                 if (ResChecker.checkRes(TAG, jo)) {
                                     Log.other("商家服务🏬[$title]#领取积分$reward")
+                                    doubleCheck = true
+                                } else {
+                                    // 检查是否为竞赛类任务（无法通过RPC完成的类型）
+                                    val spaceCode = task.optString("spaceCode", "")
+                                    if (spaceCode.contains("COMPETITION") || spaceCode.contains("MIX")) {
+                                        Log.record(TAG, "商家服务🏬[$title]#竞赛类任务不支持RPC完成，跳过")
+                                    }
                                 }
-                                doubleCheck = true
                             } else {
-                                when (val taskCode = task.getString("taskCode")) {
-                                    "SYH_CPC_DYNAMIC" ->                   // 逛一逛商品橱窗
-                                        taskReceive(taskCode, "SYH_CPC_DYNAMIC_VIEWED", title)
+                                val taskCode = task.optString("taskCode", "")
+                                if (taskCode.isEmpty()) {
+                                    Log.record(TAG, "商家服务🏬[$title]#缺少taskCode，跳过")
+                                } else {
+                                    when (taskCode) {
+                                        "SYH_CPC_DYNAMIC" ->                   // 逛一逛商品橱窗
+                                            taskReceive(taskCode, "SYH_CPC_DYNAMIC_VIEWED", title)
 
-                                    "JFLLRW_TASK" ->                   // 逛一逛得缴费红包
-                                        taskReceive(taskCode, "JFLL_VIEWED", title)
+                                        "JFLLRW_TASK" ->                   // 逛一逛得缴费红包
+                                            taskReceive(taskCode, "JFLL_VIEWED", title)
 
-                                    "ZFBHYLLRW_TASK" ->                   // 逛一逛目标应用会员
-                                        taskReceive(taskCode, "ZFBHYLL_VIEWED", title)
+                                        "ZFBHYLLRW_TASK" ->                   // 逛一逛目标应用会员
+                                            taskReceive(taskCode, "ZFBHYLL_VIEWED", title)
 
-                                    "QQKLLRW_TASK" ->                   // 逛一逛目标应用亲情卡
-                                        taskReceive(taskCode, "QQKLL_VIEWED", title)
+                                        "QQKLLRW_TASK" ->                   // 逛一逛目标应用亲情卡
+                                            taskReceive(taskCode, "QQKLL_VIEWED", title)
 
-                                    "SSLLRW_TASK" ->                   // 逛逛领优惠得红包
-                                        taskReceive(taskCode, "SSLL_VIEWED", title)
+                                        "SSLLRW_TASK" ->                   // 逛逛领优惠得红包
+                                            taskReceive(taskCode, "SSLL_VIEWED", title)
 
-                                    "ELMGYLLRW2_TASK" ->                   // 去饿了么果园0元领水果
-                                        taskReceive(taskCode, "ELMGYLL_VIEWED", title)
+                                        "ELMGYLLRW2_TASK" ->                   // 去饿了么果园0元领水果
+                                            taskReceive(taskCode, "ELMGYLL_VIEWED", title)
 
-                                    "ZMXYLLRW_TASK" ->                   // 去逛逛芝麻攒粒攻略
-                                        taskReceive(taskCode, "ZMXYLL_VIEWED", title)
+                                        "ZMXYLLRW_TASK" ->                   // 去逛逛芝麻攒粒攻略
+                                            taskReceive(taskCode, "ZMXYLL_VIEWED", title)
 
-                                    "GXYKPDDYH_TASK" ->                   // 逛信用卡频道得优惠
-                                        taskReceive(taskCode, "xykhkzd_VIEWED", title)
+                                        "GXYKPDDYH_TASK" ->                   // 逛信用卡频道得优惠
+                                            taskReceive(taskCode, "xykhkzd_VIEWED", title)
 
-                                    "HHKLLRW_TASK" ->                   // 49999元花呗红包集卡抽
-                                        taskReceive(taskCode, "HHKLLX_VIEWED", title)
+                                        "HHKLLRW_TASK" ->                   // 49999元花呗红包集卡抽
+                                            taskReceive(taskCode, "HHKLLX_VIEWED", title)
 
-                                    "TBNCLLRW_TASK" ->                   // 去淘宝芭芭农场领水果百货
-                                        taskReceive(taskCode, "TBNCLLRW_TASK_VIEWED", title)
+                                        "TBNCLLRW_TASK" ->                   // 去淘宝芭芭农场领水果百货
+                                            taskReceive(taskCode, "TBNCLLRW_TASK_VIEWED", title)
+
+                                        else -> {
+                                            Log.record(TAG, "商家服务🏬[$title]#未知taskCode=$taskCode，跳过")
+                                        }
+                                    }
                                 }
                             }
                         }
                     }
                     if (doubleCheck) {
-                        doMerchantMoreTask()
+                        doMerchantMoreTask(depth + 1)
                     }
                 } else {
                     record(TAG, "taskListQuery err: $s")

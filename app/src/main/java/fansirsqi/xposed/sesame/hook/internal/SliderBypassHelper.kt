@@ -1,5 +1,7 @@
 package fansirsqi.xposed.sesame.hook.internal
 
+import android.graphics.Bitmap
+import android.graphics.Canvas
 import android.os.SystemClock
 import android.view.MotionEvent
 import android.view.View
@@ -12,7 +14,9 @@ import de.robv.android.xposed.XposedHelpers
 import fansirsqi.xposed.sesame.hook.ApplicationHook
 import fansirsqi.xposed.sesame.model.BaseModel
 import fansirsqi.xposed.sesame.util.Log
+import java.io.ByteArrayOutputStream
 import java.lang.reflect.Proxy
+import java.util.Base64
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 
@@ -54,9 +58,8 @@ object SliderBypassHelper {
             // 4. Hook antcaptcha.verify - 绕过滑块验证 RPC
             hookAntCaptcha(loader)
 
-            // 以下弹窗自动关闭已禁用（用户要求保留支付宝原生弹窗行为）
             // 5. Hook 风险提示弹窗
-            // hookRiskDialog(loader)
+            hookRiskDialog(loader)
 
             // 6. Hook 广告/促销弹窗自动关闭
             // hookAdPromotionDialog(loader)
@@ -67,8 +70,8 @@ object SliderBypassHelper {
             // 8. Hook 版本更新弹窗自动关闭
             // hookUpdateDialog(loader)
 
-            // 9. Hook 通用Dialog.show()自动关闭已知弹窗
-            // hookGeneralDialogDismiss(loader)
+            // 9. Hook 通用Dialog.show()自动关闭已知弹窗（含访问被拒绝弹窗）
+            hookGeneralDialogDismiss(loader)
 
             hookInstalled = true
             Log.record(TAG, "所有滑块绕过 Hook 安装成功")
@@ -160,14 +163,24 @@ object SliderBypassHelper {
     private fun checkActivityForSliderContent(activity: android.app.Activity, className: String) {
         try {
             val decorView = activity.window?.decorView ?: return
-            // 扫描视图树中的文本内容
             val texts = mutableListOf<String>()
             collectViewTexts(decorView, texts)
             val content = texts.joinToString(" ").lowercase()
-            if (content.contains("滑块") || content.contains("滑动") ||
+
+            val isPuzzleSlider = content.contains("拼图") ||
+                content.contains("请拖动滑块完成拼图") ||
+                content.contains("为保障您的正常访问") ||
+                content.contains("反馈码")
+
+            val isNormalSlider = content.contains("滑块") || content.contains("滑动") ||
                 content.contains("slider") || content.contains("slide") ||
                 content.contains("drag") || content.contains("captcha") ||
-                content.contains("人机验证") || content.contains("安全验证")) {
+                content.contains("人机验证") || content.contains("安全验证")
+
+            if (isPuzzleSlider) {
+                Log.record(TAG, "Activity内容检测到拼图滑块: $className")
+                schedulePuzzleSlide(activity, 1000)
+            } else if (isNormalSlider) {
                 Log.record(TAG, "Activity内容检测到滑块关键词: $className")
                 scheduleAutoSlide(activity, 1000)
             }
@@ -222,6 +235,303 @@ object SliderBypassHelper {
         slideExecutor.schedule({
             tryAutoSlideWithRetry(activity, 3)
         }, delayMs, TimeUnit.MILLISECONDS)
+    }
+
+    /**
+     * 拼图滑块专用调度：先尝试截图识别，失败后使用多位置试探策略
+     */
+    private fun schedulePuzzleSlide(activity: android.app.Activity, delayMs: Long) {
+        slideExecutor.schedule({
+            tryPuzzleSlideWithRetry(activity, 5)
+        }, delayMs, TimeUnit.MILLISECONDS)
+    }
+
+    /**
+     * 拼图滑块多轮试探：截图识别 -> 多位置滑动试探
+     * 拼图验证需要将滑块精确移动到拼图缺口对齐位置
+     */
+    private fun tryPuzzleSlideWithRetry(activity: android.app.Activity, maxAttempts: Int) {
+        val decorView = activity.window?.decorView ?: return
+
+        // 策略A: 尝试捕获截图辅助识别拼图缺口位置
+        if (maxAttempts >= 3) {
+            Log.record(TAG, "拼图滑块-策略A: 尝试截图识别缺口位置")
+            val puzzleResult = performPuzzleSlideByCapture(activity, decorView)
+            if (puzzleResult) {
+                Log.record(TAG, "拼图滑块-策略A: 截图识别滑动完成")
+                return
+            }
+        }
+
+        // 策略B: 多位置试探滑动
+        Log.record(TAG, "拼图滑块-策略B: 多位置试探滑动")
+        for (attempt in 1..maxAttempts) {
+            try {
+                // 使用基于位置的试探，每个试探使用不同距离
+                val trialResult = tryPuzzlePositionTrial(activity, decorView, attempt)
+                if (trialResult) {
+                    Log.record(TAG, "拼图滑块-策略B: 试探成功(第${attempt}次)")
+                    return
+                }
+                if (attempt < maxAttempts) {
+                    Thread.sleep(500)
+                }
+            } catch (e: Throwable) {
+                Log.record(TAG, "拼图滑块试探异常(第${attempt}次): ${e.message}")
+            }
+        }
+        Log.record(TAG, "拼图滑块全部试探失败，保持页面等待手动操作")
+    }
+
+    /**
+     * 策略A: 通过截图分析拼图缺口位置并滑动
+     */
+    private fun performPuzzleSlideByCapture(activity: android.app.Activity, decorView: View): Boolean {
+        try {
+            val puzzleImageSize = findPuzzleImageDimensions(decorView)
+            val trackView = findPuzzleTrackView(decorView)
+            if (puzzleImageSize == null || trackView == null) {
+                Log.record(TAG, "拼图滑块-策略A: 未找到拼图图像或滑轨")
+                return false
+            }
+
+            // 截取拼图区域的Bitmap
+            val bitmap = Bitmap.createBitmap(
+                decorView.width, decorView.height, Bitmap.Config.ARGB_8888
+            )
+            val canvas = Canvas(bitmap)
+            decorView.draw(canvas)
+
+            // 简单的缺口检测：扫描像素变化找出拼图缺口区域
+            // 从图像中提取可能的缺口位置范围
+            val gapEstimate = estimateGapPosition(bitmap)
+            bitmap.recycle()
+
+            if (gapEstimate > 0.05f) {
+                val trackWidth = trackView.width.toFloat()
+                val slideDistance = trackWidth * gapEstimate
+                Log.record(TAG, "拼图滑块-截图识别: estimatedGap=$gapEstimate, slideDist=$slideDistance")
+                executePuzzleSlideOnTrack(trackView, slideDistance)
+                return true
+            }
+        } catch (e: Throwable) {
+            Log.record(TAG, "拼图截图识别异常: ${e.message}")
+        }
+        return false
+    }
+
+    /**
+     * 估计拼图缺口在图像中的水平位置比例（0-1）
+     */
+    private fun estimateGapPosition(bitmap: Bitmap): Float {
+        try {
+            val width = bitmap.width
+            val height = bitmap.height
+            val sampleStep = 4
+            val edgeThreshold = 30
+
+            // 从上往下扫描，寻找边缘变化最大的区域
+            var bestScore = 0f
+            var bestCenterRatio = 0f
+
+            for (centerPercent in 20..80 step 5) {
+                val centerX = (width * centerPercent / 100)
+                val startX = maxOf(0, centerX - width / 8)
+                val endX = minOf(width - 1, centerX + width / 8)
+                var edgeScore = 0
+
+                for (y in height / 3..(height * 2 / 3) step sampleStep) {
+                    for (x in startX..endX step sampleStep) {
+                        if (x + sampleStep < width) {
+                            val diff = kotlin.math.abs(
+                                (bitmap.getPixel(x, y) and 0xFF) -
+                                (bitmap.getPixel(x + sampleStep, y) and 0xFF)
+                            )
+                            if (diff > edgeThreshold) edgeScore++
+                        }
+                    }
+                }
+                if (edgeScore > bestScore) {
+                    bestScore = edgeScore.toFloat()
+                    bestCenterRatio = centerPercent / 100f
+                }
+            }
+            return bestCenterRatio
+        } catch (_: Throwable) {
+            return 0.35f
+        }
+    }
+
+    /**
+     * 查找拼图图片的尺寸（宽, 高）
+     */
+    private fun findPuzzleImageDimensions(root: View): Pair<Int, Int>? {
+        val candidates = mutableListOf<View>()
+        collectPuzzleImageViews(root, candidates)
+        for (v in candidates) {
+            val w = v.width
+            val h = v.height
+            if (w in 250..1200 && h in 120..600) {
+                return Pair(w, h)
+            }
+        }
+        return null
+    }
+
+    private fun collectPuzzleImageViews(view: View, candidates: MutableList<View>) {
+        val className = view.javaClass.name.lowercase()
+        if (className.contains("image") || className.contains("picture") || className.contains("screenshot")) {
+            candidates.add(view)
+        }
+        if (view is ViewGroup) {
+            for (i in 0 until minOf(view.childCount, 50)) {
+                val child = view.getChildAt(i) ?: continue
+                collectPuzzleImageViews(child, candidates)
+            }
+        }
+    }
+
+    /**
+     * 查找拼图滑轨控件
+     */
+    private fun findPuzzleTrackView(root: View): View? {
+        val candidates = mutableListOf<View>()
+        collectTrackCandidates(root, candidates)
+        candidates.sortByDescending { it.width }
+        return candidates.firstOrNull { v ->
+            val loc = IntArray(2)
+            v.getLocationOnScreen(loc)
+            v.width in 200..(root.width) && v.height in 40..180 &&
+                loc[1] > root.height * 0.55f
+        }
+    }
+
+    private fun collectTrackCandidates(view: View, candidates: MutableList<View>) {
+        val className = view.javaClass.name.lowercase()
+        if (className.contains("seek") || className.contains("track") || className.contains("slide") ||
+            className.contains("bar") || className.contains("slidercontainer")
+        ) {
+            candidates.add(view)
+        }
+        // 也收集背景为非空的容器view
+        if (view.background != null && view.width > 150 && view.height in 40..180) {
+            candidates.add(view)
+        }
+        if (view is ViewGroup) {
+            for (i in 0 until minOf(view.childCount, 30)) {
+                val child = view.getChildAt(i) ?: continue
+                collectTrackCandidates(child, candidates)
+            }
+        }
+    }
+
+    /**
+     * 在滑轨上执行拼图滑动
+     */
+    private fun executePuzzleSlideOnTrack(trackView: View, slideDistance: Float) {
+        val loc = IntArray(2)
+        trackView.getLocationOnScreen(loc)
+        val startX = loc[0] + trackView.width * 0.08f
+        val startY = loc[1] + trackView.height / 2f
+        val downTime = SystemClock.uptimeMillis()
+
+        val downEvent = MotionEvent.obtain(
+            downTime, downTime, MotionEvent.ACTION_DOWN, startX, startY, 0
+        )
+        trackView.dispatchTouchEvent(downEvent)
+        downEvent.recycle()
+
+        val totalSteps = 20
+        var currentX = startX
+        var eventTime = downTime + 60
+
+        for (i in 1..totalSteps) {
+            val progress = i.toFloat() / totalSteps
+            val easeProgress = easeProgress(progress)
+            currentX = startX + slideDistance * easeProgress
+            val jitter = ((Math.random() - 0.5) * 3).toFloat()
+
+            val stepDuration = when {
+                progress < 0.2f -> 10L + (3..8).random()
+                progress > 0.75f -> 8L + (5..12).random()
+                else -> 6L + (2..5).random()
+            }
+            eventTime += stepDuration
+
+            val moveEvent = MotionEvent.obtain(
+                downTime, eventTime, MotionEvent.ACTION_MOVE, currentX, startY + jitter, 0
+            )
+            trackView.dispatchTouchEvent(moveEvent)
+            moveEvent.recycle()
+            try { Thread.sleep(stepDuration) } catch (_: Throwable) {}
+        }
+
+        eventTime += 30
+        val upEvent = MotionEvent.obtain(
+            downTime, eventTime, MotionEvent.ACTION_UP, currentX, startY, 0
+        )
+        trackView.dispatchTouchEvent(upEvent)
+        upEvent.recycle()
+        Thread.sleep(300)
+    }
+
+    /**
+     * 策略B: 多位置试探 - 尝试不同滑动距离
+     */
+    private fun tryPuzzlePositionTrial(activity: android.app.Activity, decorView: View, attempt: Int): Boolean {
+        try {
+            val trackView = findPuzzleTrackView(decorView)
+            if (trackView == null) {
+                // 回退：在拼图页面常见区域执行坐标滑动
+                val baseDistances = listOf(0.32f, 0.45f, 0.58f, 0.38f, 0.52f, 0.42f, 0.48f, 0.35f)
+                val idx = (attempt - 1) % baseDistances.size
+                val ratio = baseDistances[idx]
+                Log.record(TAG, "拼图坐标试探($attempt): ratio=$ratio")
+                val result = performCoordinateSlide(decorView, 0.72f)
+                if (result) {
+                    Thread.sleep(500)
+                    // 检查页面是否已关闭（验证通过则页面消失）
+                    try {
+                        if (activity.isFinishing || activity.isDestroyed) return true
+                        val newTexts = mutableListOf<String>()
+                        collectViewTexts(activity.window?.decorView ?: return false, newTexts)
+                        val newContent = newTexts.joinToString(" ").lowercase()
+                        return !newContent.contains("拼图") && !newContent.contains("验证")
+                    } catch (_: Throwable) {}
+                }
+                return false
+            }
+
+            val trackLoc = IntArray(2)
+            trackView.getLocationOnScreen(trackLoc)
+            val trackWidth = trackView.width.toFloat()
+            val trackX = trackLoc[0].toFloat()
+            val trackY = trackLoc[1] + trackView.height / 2f
+
+            // 试探位置分布: 从左侧到右侧，覆盖更多可能位置
+            val trialRatios = listOf(0.28f, 0.42f, 0.55f, 0.35f, 0.48f, 0.62f, 0.32f, 0.52f, 0.38f, 0.58f)
+            val idx = (attempt - 1) % trialRatios.size
+            val ratio = trialRatios[idx]
+            val distance = trackWidth * ratio
+
+            Log.record(TAG, "拼图滑轨试探($attempt): trackWidth=$trackWidth, ratio=$ratio, dist=$distance")
+
+            // 在滑轨上执行指定距离的滑动
+            executeCoordinateTouchGesture(trackView, trackX + trackWidth * 0.06f, trackY, distance)
+
+            Thread.sleep(600)
+            // 检查验证是否通过
+            try {
+                if (activity.isFinishing || activity.isDestroyed) return true
+                val newTexts = mutableListOf<String>()
+                collectViewTexts(activity.window?.decorView ?: return false, newTexts)
+                val newContent = newTexts.joinToString(" ").lowercase()
+                return !newContent.contains("拼图") && !newContent.contains("验证")
+            } catch (_: Throwable) {}
+        } catch (e: Throwable) {
+            Log.record(TAG, "拼图试探异常($attempt): ${e.message}")
+        }
+        return false
     }
 
     /**
@@ -884,7 +1194,11 @@ object SliderBypassHelper {
                                 if (fragClass.contains("Verify") ||
                                     fragClass.contains("Risk") ||
                                     fragClass.contains("SecurityDialog") ||
-                                    fragClass.contains("SafePay")
+                                    fragClass.contains("SafePay") ||
+                                    fragClass.contains("AccessDenied") ||
+                                    fragClass.contains("DeniedDialog") ||
+                                    fragClass.contains("WarnDialog") ||
+                                    fragClass.contains("WarnFragment")
                                 ) {
                                     Log.record(TAG, "自动关闭安全验证弹窗: $fragClass")
                                     try {
@@ -1039,8 +1353,17 @@ object SliderBypassHelper {
                 "GuideDialog", "TutorialDialog", "RatingDialog",
                 "FeedbackDialog", "SurveyDialog", "InviteDialog",
                 "ShareDialog", "BindCardDialog", "RealNameDialog",
-                "FaceVerifyDialog", "IdCardDialog"
+                "FaceVerifyDialog", "IdCardDialog",
+                "DeniedDialog", "AccessDeniedDialog", "BlockDialog",
+                "RiskDialog", "SecurityDialog", "WarnDialog"
             )
+
+            val accessDeniedTexts = arrayOf(
+                "访问被拒绝", "访问受限", "拒绝访问", "访问已被拒绝",
+                "当前无法访问", "无法访问", "暂无权限",
+                "access denied", "access denied"
+            )
+
             XposedHelpers.findAndHookMethod(
                 "android.app.AlertDialog",
                 loader,
@@ -1058,6 +1381,19 @@ object SliderBypassHelper {
                                     return
                                 }
                             }
+                            // 检测弹窗消息内容是否包含访问被拒绝关键词
+                            try {
+                                val actualMessage = XposedHelpers.callMethod(dialog, "getMessage") as? CharSequence
+                                val msgText = actualMessage?.toString() ?: ""
+                                for (denyText in accessDeniedTexts) {
+                                    if (msgText.contains(denyText)) {
+                                        Log.record(TAG, "自动关闭访问被拒绝弹窗(内容检测): $msgText")
+                                        scheduleDismiss(dialog, 0)
+                                        param.result = null
+                                        return
+                                    }
+                                }
+                            } catch (_: Throwable) {}
                         } catch (_: Throwable) {}
                     }
                 })
@@ -1078,6 +1414,18 @@ object SliderBypassHelper {
                                     return
                                 }
                             }
+                            // 检测Builder构建的弹窗消息内容
+                            try {
+                                val actualMessage = XposedHelpers.callMethod(dialog, "getMessage") as? CharSequence
+                                val msgText = actualMessage?.toString() ?: ""
+                                for (denyText in accessDeniedTexts) {
+                                    if (msgText.contains(denyText)) {
+                                        Log.record(TAG, "自动关闭Builder访问被拒绝弹窗(内容检测): $msgText")
+                                        scheduleDismiss(dialog, 0)
+                                        return
+                                    }
+                                }
+                            } catch (_: Throwable) {}
                         } catch (_: Throwable) {}
                     }
                 })
